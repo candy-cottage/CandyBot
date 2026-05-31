@@ -1,0 +1,493 @@
+﻿@using CandyCottage.CandyBot.Models
+@model SheetViewModel
+
+@{
+    Layout = null;
+    ViewData["Title"] = "腾讯文档在线表格查看器";
+}
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"]</title>
+    <style>
+            /* ----- 全局重置与字体 ----- */
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                background: linear-gradient(145deg, #f0f4fa 0%, #e9eef4 100%);
+                font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+                padding: 2rem 1.5rem;
+                min-height: 100vh;
+            }
+
+            /* 主卡片容器 */
+            .viewer-container {
+                max-width: 1400px;
+                margin: 0 auto;
+                background: rgba(255, 255, 255, 0.96);
+                backdrop-filter: blur(0px);
+                border-radius: 2rem;
+                box-shadow: 0 20px 35px -12px rgba(0, 0, 0, 0.12), 0 2px 5px rgba(0, 0, 0, 0.02);
+                overflow: hidden;
+                transition: all 0.2s ease;
+            }
+
+            /* 头部区域 */
+            .hero-section {
+                background: white;
+                padding: 1.8rem 2rem 1.2rem 2rem;
+                border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            }
+
+            .hero-title {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                font-size: 1.8rem;
+                font-weight: 600;
+                color: #1e6f5c;
+                letter-spacing: -0.3px;
+            }
+
+                .hero-title span {
+                    font-size: 2rem;
+                }
+
+            .hero-sub {
+                color: #5b6e8c;
+                margin-top: 8px;
+                font-size: 0.9rem;
+                border-left: 3px solid #2c9a7a;
+                padding-left: 12px;
+            }
+
+            /* 查询面板 */
+            .query-panel {
+                padding: 1.6rem 2rem 1rem 2rem;
+                background: #ffffff;
+                border-bottom: 1px solid #eef2f8;
+            }
+
+            .form-grid {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: flex-end;
+                gap: 1.2rem;
+            }
+
+            .input-group {
+                flex: 1;
+                min-width: 200px;
+            }
+
+                .input-group label {
+                    display: block;
+                    font-size: 0.8rem;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    color: #3b4e66;
+                    margin-bottom: 6px;
+                }
+
+            .modern-input {
+                width: 100%;
+                padding: 12px 16px;
+                font-size: 0.95rem;
+                border: 1.5px solid #e2e8f0;
+                border-radius: 18px;
+                background: #fefefe;
+                transition: all 0.2s;
+                outline: none;
+                font-family: inherit;
+            }
+
+                .modern-input:focus {
+                    border-color: #2c9a7a;
+                    box-shadow: 0 0 0 3px rgba(44, 154, 122, 0.2);
+                    background: #fff;
+                }
+
+                .modern-input::placeholder {
+                    color: #b9c3d4;
+                    font-weight: 400;
+                }
+
+            /* 按钮 */
+            .btn-modern {
+                background: linear-gradient(105deg, #1e6f5c, #28967e);
+                border: none;
+                padding: 12px 28px;
+                border-radius: 40px;
+                font-weight: 600;
+                font-size: 0.9rem;
+                color: white;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                letter-spacing: 0.3px;
+            }
+
+                .btn-modern:hover {
+                    background: linear-gradient(105deg, #155a4b, #1f8068);
+                    transform: translateY(-1px);
+                    box-shadow: 0 10px 18px -6px rgba(30, 111, 92, 0.4);
+                }
+
+                .btn-modern:disabled {
+                    background: #b9cfd4;
+                    transform: none;
+                    box-shadow: none;
+                    cursor: not-allowed;
+                    opacity: 0.7;
+                }
+
+            /* 工作表选择栏 */
+            .sheet-selector-area {
+                padding: 0.8rem 2rem;
+                background: #ffffff;
+                border-bottom: 1px solid #eef2f8;
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 12px;
+            }
+
+            .sheet-label {
+                font-weight: 600;
+                color: #2c5a6e;
+                background: #ecfdf5;
+                padding: 5px 12px;
+                border-radius: 40px;
+                font-size: 0.75rem;
+            }
+
+            .sheet-select {
+                padding: 8px 24px 8px 12px;
+                border-radius: 40px;
+                border: 1px solid #cbdde9;
+                background: white;
+                font-size: 0.9rem;
+                font-weight: 500;
+                color: #1f3b4c;
+                cursor: pointer;
+                outline: none;
+            }
+
+            .sheet-warning {
+                background: #fff2e5;
+                color: #c26b2e;
+                font-size: 0.75rem;
+                padding: 4px 12px;
+                border-radius: 30px;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            /* 状态区域 (loading + error) */
+            .status-area {
+                padding: 0.5rem 2rem;
+            }
+
+            .loading-card {
+                background: #eef9ff;
+                border-radius: 60px;
+                display: inline-flex;
+                align-items: center;
+                gap: 12px;
+                padding: 10px 24px;
+                color: #1e6f5c;
+                font-weight: 500;
+                backdrop-filter: blur(4px);
+                margin: 8px 0;
+            }
+
+            .spinner {
+                width: 22px;
+                height: 22px;
+                border: 2.5px solid rgba(30, 111, 92, 0.2);
+                border-top: 2.5px solid #1e6f5c;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            }
+
+            @@keyframes spin {
+                from {
+                    transform: rotate(0deg);
+                }
+
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            .error-toast {
+                background: #fff2f0;
+                border-left: 5px solid #e26d5c;
+                padding: 12px 20px;
+                border-radius: 18px;
+                color: #b13e2e;
+                font-weight: 500;
+                margin: 12px 0;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                box-shadow: 0 3px 8px rgba(0, 0, 0, 0.02);
+            }
+
+            /* 统计栏 */
+            .stats-bar {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                flex-wrap: wrap;
+                padding: 0.8rem 2rem 0.4rem 2rem;
+                font-size: 0.85rem;
+                color: #2c5a6e;
+                font-weight: 500;
+                gap: 12px;
+            }
+
+            .badge {
+                background: #ecfdf5;
+                padding: 5px 12px;
+                border-radius: 40px;
+                color: #1d6f5c;
+                font-size: 0.75rem;
+                font-weight: 600;
+            }
+
+            /* 表格容器 */
+            .table-wrapper {
+                padding: 0rem 2rem 2rem 2rem;
+                overflow-x: auto;
+            }
+
+            .modern-table {
+                width: 100%;
+                border-collapse: separate;
+                border-spacing: 0;
+                background: white;
+                border-radius: 24px;
+                overflow: hidden;
+                box-shadow: 0 5px 14px rgba(0, 0, 0, 0.03), 0 0 0 1px #edf2f7;
+                font-size: 0.9rem;
+            }
+
+                .modern-table thead tr {
+                    background: #f8fafd;
+                    border-bottom: 1px solid #e2edf2;
+                }
+
+                .modern-table th {
+                    padding: 14px 16px;
+                    text-align: left;
+                    font-weight: 700;
+                    color: #1e3a4d;
+                    background: #f9fbfe;
+                    border-bottom: 1.5px solid #e4eef5;
+                    font-size: 0.85rem;
+                    letter-spacing: 0.3px;
+                }
+
+                .modern-table td {
+                    padding: 12px 16px;
+                    border-bottom: 1px solid #eff3f8;
+                    color: #1f2e45;
+                    word-break: break-word;
+                    vertical-align: top;
+                }
+
+                .modern-table tbody tr:hover {
+                    background-color: #f6fefb;
+                    transition: 0.1s;
+                }
+
+                .modern-table tbody tr:last-child td {
+                    border-bottom: none;
+                }
+
+            .empty-state {
+                background: #ffffffdd;
+                text-align: center;
+                padding: 3rem 1rem;
+                border-radius: 28px;
+                color: #6c86a3;
+                font-weight: 500;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 12px;
+            }
+
+            /* 响应式 */
+            @@media (max-width: 680px) {
+                body {
+                    padding: 1rem;
+                }
+
+                .form-grid {
+                    flex-direction: column;
+                    align-items: stretch;
+                }
+
+                .btn-modern {
+                    justify-content: center;
+                }
+
+                .hero-title {
+                    font-size: 1.4rem;
+                }
+
+                .query-panel, .hero-section, .table-wrapper, .sheet-selector-area {
+                    padding-left: 1.2rem;
+                    padding-right: 1.2rem;
+                }
+
+                .stats-bar {
+                    padding-left: 1.2rem;
+                    padding-right: 1.2rem;
+                }
+            }
+
+            .table-wrapper::-webkit-scrollbar {
+                height: 8px;
+            }
+
+            .table-wrapper::-webkit-scrollbar-track {
+                background: #eef2f6;
+                border-radius: 10px;
+            }
+
+            .table-wrapper::-webkit-scrollbar-thumb {
+                background: #b9cdd9;
+                border-radius: 10px;
+            }
+    </style>
+</head>
+<body>
+    <div class="viewer-container">
+        <div class="hero-section">
+            <div class="hero-title">
+                <span>📄✨</span> 腾讯文档在线表格查看器
+            </div>
+        </div>
+
+        <!-- 查询表单 -->
+        <div class="query-panel">
+            <form method="get" asp-action="RazorViewer" asp-controller="Sheet">
+                <div class="form-grid">
+                    <div class="input-group">
+                        <label>📁 文件编号 (fileId)</label>
+                        <input type="text" name="fileId" class="modern-input" value="@Model.FileId" placeholder="例如: DSM_3e7k9q" required />
+                    </div>
+                    <div>
+                        <button type="submit" class="btn-modern">🔍 加载文档</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- 全局错误 -->
+        @if (Model.Messages.ContainsKey("error"))
+        {
+            <div class="error-toast">
+                <span>⚠️</span> @Model.Messages["error"]
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(Model.FileId) && Model.SheetTitles.Count > 0)
+        {
+            <!-- 工作表切换栏 -->
+            <div class="sheet-selector-area">
+                <span class="sheet-label">📑 当前工作表：</span>
+                <form method="get" asp-action="RazorViewer" asp-controller="Sheet" style="display: inline-flex; gap: 0.5rem; align-items: center;">
+                    <input type="hidden" name="fileId" value="@Model.FileId" />
+                    <select name="title" class="sheet-select" onchange="this.form.submit()">
+                        @foreach (var title in Model.SheetTitles)
+                        {
+                            <option value="@title" selected="@(title == Model.CurrentTitle)">
+                                @title
+                            </option>
+                        }
+                    </select>
+                    <noscript>
+                        <button type="submit" class="btn-modern" style="padding: 6px 12px;">切换</button>
+                    </noscript>
+                </form>
+
+                @if (Model.Messages.TryGetValue(Model.CurrentTitle, out var sheetErr))
+                {
+                    <div class="sheet-warning">⚠️ @sheetErr</div>
+                }
+            </div>
+
+            <!-- 统计信息 -->
+            <div class="stats-bar">
+                @{
+                    var colCount = Model.CurrentGrid.Count > 0 ? Model.CurrentGrid[0].Count : 0;
+                    var dataRows = Model.CurrentGrid.Count > 0 ? Model.CurrentGrid.Count - 1 : 0;
+                }
+                <div class="badge">📊 列数：@colCount</div>
+                <div class="badge">📋 数据行：@dataRows</div>
+                <div class="badge">✨ 表头 + @dataRows 条记录</div>
+            </div>
+
+            <!-- 表格渲染（完全服务端生成） -->
+            <div class="table-wrapper">
+                @if (Model.CurrentGrid.Count == 0)
+                {
+                    <div class="empty-state">📭 当前工作表无数据</div>
+                }
+                else
+                {
+                    <table class="modern-table">
+                        <thead>
+                            <tr>
+                                @foreach (var header in Model.CurrentGrid[0])
+                                {
+                                    <th>@(string.IsNullOrEmpty(header) ? "&nbsp;" : Html.Raw(header))</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 1; i < Model.CurrentGrid.Count; i++)
+                            {
+                                <tr>
+                                    @{
+                                        var row = Model.CurrentGrid[i];
+                                        for (int j = 0; j < Model.CurrentGrid[0].Count; j++)
+                                        {
+                                            var cell = (j < row.Count) ? row[j] : "";
+                                            <td>@(string.IsNullOrEmpty(cell) ? "—" : Html.Raw(cell))</td>
+                                        }
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(Model.FileId) && Model.SheetTitles.Count == 0)
+        {
+            <div class="empty-state" style="padding: 2rem;">⚠️ 未找到任何工作表，请检查 fileId 和文档权限。</div>
+        }
+        else
+        {
+            <div class="empty-state" style="padding: 3rem;">✨ 在上方输入腾讯文档的 fileId，即可查看所有工作表数据</div>
+        }
+    </div>
+</body>
+</html>
