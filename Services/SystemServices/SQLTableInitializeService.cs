@@ -60,7 +60,7 @@ namespace CandyCottage.CandyBot.Services.SystemServices
                 sql.Rollback();
                 initializationConfig.Clear();
                 initializationConfig.SaveConfig();
-                logger.LogError(ex, "Error: {ex.Message}", ex.Message);
+                logger.LogError(ex, "Error: {Message}", ex.Message);
                 msg = $"系统初始化遇到错误：{ex.Message}，请检查服务器日志！";
             }
         }

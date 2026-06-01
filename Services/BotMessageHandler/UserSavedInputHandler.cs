@@ -25,17 +25,6 @@ public partial class CandyBotService
 
         try
         {
-            if (e.Detail == "系统初始化")
-            {
-                if (sqlInitService.WillInitialize())
-                {
-                    sqlInitService.Initialize(e.AuthorOpenId, out string msg);
-                    md.Content = msg;
-                    await botService.SendAsync(e, reply);
-                }
-                return true;
-            }
-
             if (e.Detail == "创建存档")
             {
                 if (user != null)

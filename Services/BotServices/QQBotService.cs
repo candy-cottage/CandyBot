@@ -57,6 +57,11 @@ namespace CandyCottage.CandyBot.Services.BotServices
 
         public async Task SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)
         {
+            if (msg is ConsoleInputMessage)
+            {
+                if (Logger.IsEnabled(LogLevel.Information)) Logger.LogInformation("Handle Console Input: {Detail} => {Content}", msg.Detail, reply.Markdown?.Content);
+                return;
+            }
             if (reply.Markdown != null && !string.IsNullOrWhiteSpace(reply.Markdown.Content))
             {
                 // 发送 Markdown + 键盘

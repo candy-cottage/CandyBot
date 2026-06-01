@@ -13,7 +13,7 @@ public partial class CandyBotService
 
         if (!WillGoOn(functionConfig.CandyCottage, user))
         {
-            md.Content = "糖果屋正在维护，请稍后再试。";
+            md.Content = "糖果屋正在装修中，为您带来不便敬请谅解～";
             await botService.SendAsync(e, reply);
             return true;
         }

@@ -198,7 +198,7 @@ namespace CandyCottage.CandyBot.Services
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error: {ex.Message}", ex.Message);
+                logger.LogError(ex, "Error: {Message}", ex.Message);
                 error = $"修改车辆异常：{ex.Message}";
                 return false;
             }
