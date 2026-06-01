@@ -1,6 +1,8 @@
 using System.Net;
 using CandyBot.IntegrationTests.Infrastructure;
 using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace CandyBot.IntegrationTests.Smoke;
@@ -45,65 +47,31 @@ public class NoCredentialSmokeTests : IClassFixture<CandyBotWebApplicationFactor
     }
 
     [Fact]
-    public async Task Test_getxml_returns_ok_with_two_keys()
+    public async Task Test_getxml_returns_404_in_production()
     {
-        // TestController.GetRSAXMLString：纯加密，无数据库 / 网络。返回 [公钥, 私钥]。
-        // 端点序列化 string[2]，两个元素均包含 <RSAKeyValue> 标签（index 0 公钥、index 1 私钥）。
+        // TestController 标注了 [DevelopmentOnly]：在非 Development 环境（本工厂默认 Production）下，
+        // 路由仍注册但被资源过滤器短路为 404，等效于端点不存在。
         HttpResponseMessage response = await _client.GetAsync("/test/getxml");
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        string body = await response.Content.ReadAsStringAsync();
-        // 精确断言：JSON 数组中恰好包含两个 <RSAKeyValue> 片段（公钥 + 私钥各一个）。
-        int keyCount = 0;
-        int idx = 0;
-        while ((idx = body.IndexOf("<RSAKeyValue>", idx, StringComparison.Ordinal)) >= 0)
-        {
-            keyCount++;
-            idx++;
-        }
-        keyCount.Should().Be(2, "端点应返回恰好两个 RSA 密钥（公钥 + 私钥）");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "TestController 在 Production 下应被 [DevelopmentOnly] 网关返回 404");
     }
 
     [Fact]
-    public async Task Test_gethmacsha256_returns_ok()
+    public async Task Test_gethmacsha256_returns_404_in_production()
     {
-        // TestController.UseHMACSHA256：调用 Encryption.HmacSha256(msg, key)，纯加密，匿名可访问。
-        // 实测：固定输入 msg="a", key="b" → 64 字符小写十六进制字符串，具有确定性。
-        // Ok(string) 将字符串直接写入响应体（裸字符串，无 JSON 引号）。
-        HttpResponseMessage response1 = await _client.GetAsync("/test/gethmacsha256?msg=a&key=b");
-        HttpResponseMessage response2 = await _client.GetAsync("/test/gethmacsha256?msg=a&key=b");
+        // 同上：[DevelopmentOnly] 在 Production 下使加密工具端点返回 404。
+        HttpResponseMessage response = await _client.GetAsync("/test/gethmacsha256?msg=a&key=b");
 
-        response1.StatusCode.Should().Be(HttpStatusCode.OK);
-        string body1 = await response1.Content.ReadAsStringAsync();
-        string body2 = await response2.Content.ReadAsStringAsync();
-
-        // 实测：Ok(string) 直接将字符串写入响应体（非 JSON 引号包裹），
-        // 即响应体 = 裸哈希字符串（64 字符小写十六进制）。
-        body1.Should().HaveLength(64, "HMAC-SHA256 输出应为 64 个十六进制字符");
-        body1.Should().MatchRegex("^[0-9a-f]{64}$", "HMAC-SHA256 输出应为小写十六进制字符串");
-        // 确定性：相同输入两次调用结果一致。
-        body1.Should().Be(body2, "相同输入应产生相同的 HMAC-SHA256 值（确定性函数）");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "TestController 在 Production 下应被 [DevelopmentOnly] 网关返回 404");
     }
 
     [Fact]
-    public async Task Test_gethmacsha512_returns_ok()
+    public async Task Test_gethmacsha512_returns_404_in_production()
     {
-        // TestController.UseHMACSHA512：调用 msg.Encrypt(key)（StringExtension.Encrypt = HMAC-SHA512），
-        // 纯加密，匿名可访问。
-        // 实测：固定输入 msg="a", key="b" → 128 字符小写十六进制字符串，具有确定性。
-        HttpResponseMessage response1 = await _client.GetAsync("/test/gethmacsha512?msg=a&key=b");
-        HttpResponseMessage response2 = await _client.GetAsync("/test/gethmacsha512?msg=a&key=b");
+        // 同上：[DevelopmentOnly] 在 Production 下使加密工具端点返回 404。
+        HttpResponseMessage response = await _client.GetAsync("/test/gethmacsha512?msg=a&key=b");
 
-        response1.StatusCode.Should().Be(HttpStatusCode.OK);
-        string body1 = await response1.Content.ReadAsStringAsync();
-        string body2 = await response2.Content.ReadAsStringAsync();
-
-        // 实测：Ok(string) 直接将字符串写入响应体（非 JSON 引号包裹），
-        // 即响应体 = 裸哈希字符串（128 字符小写十六进制）。
-        body1.Should().HaveLength(128, "HMAC-SHA512 输出应为 128 个十六进制字符");
-        body1.Should().MatchRegex("^[0-9a-f]{128}$", "HMAC-SHA512 输出应为小写十六进制字符串");
-        // 确定性：相同输入两次调用结果一致。
-        body1.Should().Be(body2, "相同输入应产生相同的 HMAC-SHA512 值（确定性函数）");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "TestController 在 Production 下应被 [DevelopmentOnly] 网关返回 404");
     }
 
     [Fact]
@@ -124,5 +92,48 @@ public class NoCredentialSmokeTests : IClassFixture<CandyBotWebApplicationFactor
         HttpResponseMessage response = await _client.GetAsync("/betting/bets");
 
         response.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
+    }
+}
+
+/// <summary>
+/// Development 环境下的 TestController 冒烟：与上面的 Production 404 测试配对，
+/// 共同证明 [DevelopmentOnly] 网关是“可承重的”——在 Development 下端点恢复可用（200）。
+/// 通过 WithWebHostBuilder 仅覆盖环境为 Development；工厂的 ConfigureWebHost 仍先执行，
+/// 因此后台服务移除 / SQLHelper 替身 / 出站 HTTP 阻断等隔离手段依然生效。
+/// </summary>
+public class TestControllerDevelopmentSmokeTests : IClassFixture<CandyBotWebApplicationFactory>
+{
+    private readonly HttpClient _client;
+
+    public TestControllerDevelopmentSmokeTests(CandyBotWebApplicationFactory factory)
+    {
+        _client = factory
+            .WithWebHostBuilder(builder => builder.UseEnvironment(Environments.Development))
+            .CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+            {
+                AllowAutoRedirect = false
+            });
+    }
+
+    [Fact]
+    public async Task Test_getxml_returns_ok_in_development()
+    {
+        // Development 下 [DevelopmentOnly] 放行：GetRSAXMLString 返回 [公钥, 私钥]。
+        HttpResponseMessage response = await _client.GetAsync("/test/getxml");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "TestController 在 Development 下应正常返回 200");
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("<RSAKeyValue>", "应返回 RSA 密钥 XML");
+    }
+
+    [Fact]
+    public async Task Test_gethmacsha256_returns_ok_in_development()
+    {
+        // Development 下 [DevelopmentOnly] 放行：HMAC-SHA256 端点恢复可用，返回 64 字符小写十六进制。
+        HttpResponseMessage response = await _client.GetAsync("/test/gethmacsha256?msg=a&key=b");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "TestController 在 Development 下应正常返回 200");
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().MatchRegex("^[0-9a-f]{64}$", "HMAC-SHA256 输出应为 64 字符小写十六进制字符串");
     }
 }
