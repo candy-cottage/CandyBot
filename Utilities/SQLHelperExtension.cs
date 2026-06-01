@@ -54,7 +54,7 @@ namespace CandyCottage.CandyBot.Utilities
         /// <returns></returns>
         public static DataRow? ExecuteDataRowForUpdate(this SQLHelper sql, string script = "")
         {
-            DataSet ds = sql.ExecuteDataSet(script);
+            DataSet ds = sql.ExecuteDataSetForUpdate(script);
             return sql.Success ? ds.Tables[0].Rows[0] : null;
         }
 
