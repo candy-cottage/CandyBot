@@ -42,7 +42,7 @@ namespace CandyCottage.CandyBot.Controllers
         [HttpGet("vehicles/{id}")]
         public IActionResult GetVehicleById(int id)
         {
-            var (success, _, data, _) = forzaService.GetVehicleDataTable("WHERE Id = @id", 1, 1);
+            var (success, _, data, _) = forzaService.GetVehicleById(id);
             if (!success || data == null || data.Rows.Count == 0)
                 return NotFound(new { success = false, message = $"未找到 ID 为 {id} 的车辆" });
 
