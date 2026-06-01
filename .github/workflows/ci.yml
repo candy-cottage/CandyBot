@@ -28,3 +28,15 @@ jobs:
 
       - name: Build
         run: dotnet build CandyBot.sln --configuration Release --no-restore
+
+      # MySql-tagged tests require Docker/Testcontainers and are excluded here.
+      # They run in a separate job (see Phase 6) that spins up a MySQL service container.
+      - name: Test
+        run: dotnet test CandyBot.sln --configuration Release --no-build --filter "Category!=MySql" --logger trx --collect:"XPlat Code Coverage" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: TestResults
