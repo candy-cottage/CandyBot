@@ -1,0 +1,31 @@
+# Build artifacts
+bin/
+obj/
+
+# Test projects (excluded from image build)
+tests/
+
+# Version control & IDE
+.git/
+.github/
+.vs/
+.vscode/
+.idea/
+
+# Documentation
+docs/
+*.md
+
+# Local database files (never ship into the image)
+**/*.db
+**/*.db-shm
+**/*.db-wal
+
+# Local PluginConfig directory — may contain credentials; mount as a volume instead
+configs/
+
+# Alternate solution file (not used in the Docker build)
+Enhancement.sln
+
+# Launch settings contain local dev URLs; not needed in the image
+**/launchSettings.json
