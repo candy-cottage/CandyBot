@@ -43,7 +43,7 @@
     <None Update="scripts\fungame.sql">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="scripts\FunGame_SQLite.sql">
+    <None Update="scripts\fungame_sqlite.sql">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
