@@ -51,7 +51,7 @@ public sealed class MySqlFixture : IAsyncLifetime
     private static readonly string[] DataTables =
     [
         "betting_bet_records", "betting_matches", "betting_events",
-        "Vehicles", "ApiTokens", "Users", "Inventories", "NicknameChangeRequests",
+        "Vehicles", "ApiTokens", "Users", "Inventories", "NicknameChangeRequests", "Configs",
     ];
 
     private readonly MySqlContainer _container = new MySqlBuilder()
@@ -176,9 +176,13 @@ public sealed class MySqlFixture : IAsyncLifetime
     private static void RunSchemaScripts(SQLHelper sql)
     {
         string scriptsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "scripts");
-        foreach (string script in ScriptOrder)
+        foreach (string scriptName in ScriptOrder)
         {
-            sql.ExecuteSqlFile(Path.Combine(scriptsDir, script));
+            sql.ExecuteSqlFile(Path.Combine(scriptsDir, scriptName));
+            if (sql.Result == SQLResult.SQLError)
+            {
+                throw new InvalidOperationException($"Schema script failed: {scriptName}", sql.LastException);
+            }
         }
     }
 }
@@ -187,7 +191,7 @@ public sealed class MySqlFixture : IAsyncLifetime
 /// MySQL 测试集合：所有标注 <c>[Collection(MySqlCollection.Name)]</c> 的测试类共享
 /// 同一个 <see cref="MySqlFixture"/>（即同一个容器）。
 /// </summary>
-[CollectionDefinition(Name)]
+[CollectionDefinition(MySqlCollection.Name, DisableParallelization = true)]
 public class MySqlCollection : ICollectionFixture<MySqlFixture>
 {
     public const string Name = "MySql";
