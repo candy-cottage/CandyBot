@@ -32,7 +32,7 @@ namespace CandyCottage.CandyBot.Utilities
         {
             Config.LoadConfig();
             System = Config.GetOrAdd("System", System);
-            AllowAdminsDebug = Config.GetOrAdd("CandyCottage", AllowAdminsDebug);
+            AllowAdminsDebug = Config.GetOrAdd("AllowAdminsDebug", AllowAdminsDebug);
             CandyCottage = Config.GetOrAdd("CandyCottage", CandyCottage);
             UserSaved = Config.GetOrAdd("UserSaved", UserSaved);
             UserRename = Config.GetOrAdd("UserRename", UserRename);
