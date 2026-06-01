@@ -26,4 +26,13 @@
     <ProjectReference Include="..\..\CandyBot.csproj" />
   </ItemGroup>
 
+  <!-- 将仓库根的 SQL 建表脚本复制到测试输出的 scripts/ 目录，
+       使 SQLTableInitializeService 与 MySqlFixture 在测试运行时能从
+       AppDomain.CurrentDomain.BaseDirectory/scripts/*.sql 读取到它们。 -->
+  <ItemGroup>
+    <None Include="..\..\scripts\*.sql" Link="scripts\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
