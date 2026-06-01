@@ -26,9 +26,9 @@ namespace CandyCottage.CandyBot.Services
             StringBuilder builder = new();
             builder.AppendLine("🍭 糖果屋仪表盘 🍫");
             builder.AppendLine($"🍬 昵称：{user.NickName} | {"修改昵称".CreateCmdInput("修改昵称为")}");
-            builder.AppendLine($"🍬 UID：1{user.Id.ToString().PadLeft(6, '0')}");
-            builder.AppendLine($"💰 {General.GameplayEquilibriumConstant.InGameCurrency}：{user.Inventory.Credits:0.00}");
-            builder.AppendLine($"🎟️ {General.GameplayEquilibriumConstant.InGameMaterial}：{user.Inventory.Materials:0.00}");
+            builder.AppendLine($"🍰 UID：1{user.Id.ToString().PadLeft(6, '0')}");
+            builder.AppendLine($"💰 {General.GameplayEquilibriumConstant.InGameCurrency}：{user.Inventory.Credits:N0}");
+            builder.AppendLine($"🎟️ {General.GameplayEquilibriumConstant.InGameMaterial}：{user.Inventory.Materials:N0}");
             builder.AppendLine($"🍧 注册时间：{user.RegTime.ToString(General.GeneralDateTimeFormatChinese)}");
             builder.AppendLine($"🥯 最后访问：{user.LastTime.ToString(General.GeneralDateTimeFormatChinese)}");
 
@@ -115,7 +115,7 @@ namespace CandyCottage.CandyBot.Services
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error: {ex.Message}", ex.Message);
+                logger.LogError(ex, "Error: {Message}", ex.Message);
                 return $"提交失败，原因：{ex.Message}，请稍后重试。";
             }
         }
@@ -199,7 +199,7 @@ namespace CandyCottage.CandyBot.Services
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error: {ex.Message}", ex.Message);
+                logger.LogError(ex, "Error: {Message}", ex.Message);
                 sql.Rollback();
                 requestUserId = 0;
                 return false;

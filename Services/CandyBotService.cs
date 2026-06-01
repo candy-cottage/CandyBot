@@ -35,13 +35,19 @@ namespace CandyCottage.CandyBot.Services
                     }
                     else
                     {
-                        sql.UpdateLastLogin(openid, "");
                         user = sql.GetUserByUsernameAndAutoKey(openid, autokey);
                         if (user != null)
                         {
+                            sql.UpdateLastLogin(openid, "");
                             memoryCache.Set(cacheKey, user, TimeSpan.FromMinutes(10));
                         }
                     }
+                }
+
+                // 系统级指令
+                if (await HandleSystemInput(e, user))
+                {
+                    return;
                 }
 
                 if (WillGoOn(functionConfig.System, user))
@@ -101,7 +107,7 @@ namespace CandyCottage.CandyBot.Services
                 return;
             }
 
-            if (logger.IsEnabled(LogLevel.Information)) logger.LogInformation("接收到群聊全量消息：{e.Author.Username}说: {e.Detail}", e.Author.Username, e.Detail);
+            if (logger.IsEnabled(LogLevel.Information)) logger.LogInformation("接收到群聊全量消息：{Username}说: {Detail}", e.Author.Username, e.Detail);
         }
 
         private async Task<bool> HandleToggleCommand(IBotMessage e, User? user)

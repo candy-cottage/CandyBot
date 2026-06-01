@@ -253,7 +253,7 @@ namespace CandyCottage.CandyBot.Services.BotServices
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error: {ex.Message}", ex.Message);
+                logger.LogError(ex, "Error: {Message}", ex.Message);
             }
             finally
             {
@@ -276,7 +276,7 @@ namespace CandyCottage.CandyBot.Services.BotServices
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error: {ex.Message}", ex.Message);
+                logger.LogError(ex, "Error: {Message}", ex.Message);
             }
             finally
             {

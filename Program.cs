@@ -44,6 +44,8 @@ builder.Services.AddSingleton<TencentDocsConfig>();
 builder.Services.AddSingleton<CharacterModule>();
 builder.Services.AddSingleton<ItemModule>();
 builder.Services.AddSingleton<SkillModule>();
+builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+builder.Services.AddHostedService<QueuedHostedService>();
 builder.Services.AddHostedService<SystemInitializeService>();
 builder.Services.AddScoped<MySQLHelper>();
 builder.Services.AddScoped<SQLiteHelper>();
@@ -58,8 +60,7 @@ builder.Services.AddScoped<BettingService>();
 builder.Services.AddScoped<ForzaService>();
 builder.Services.AddScoped<CandyBotService>();
 builder.Services.AddHostedService<SystemInitializedService>();
-builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
-builder.Services.AddHostedService<QueuedHostedService>();
+builder.Services.AddHostedService<ConsoleInputService>();
 
 WebApplication app = builder.Build();
 
@@ -77,6 +78,3 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
-
-// 暴露 Program 类型供集成测试的 WebApplicationFactory<Program> 使用
-public partial class Program { }

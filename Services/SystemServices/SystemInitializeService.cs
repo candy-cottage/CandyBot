@@ -22,6 +22,7 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             logger.LogInformation("设置游戏平衡常数 . . .");
             General.GameplayEquilibriumConstant.InGameCurrency = "金币";
             General.GameplayEquilibriumConstant.InGameMaterial = "糖果券";
+            General.GameplayEquilibriumConstant.InGameTime = "虚秒";
             logger.LogInformation("初始化完毕！");
             return Task.CompletedTask;
         }

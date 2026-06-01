@@ -171,6 +171,17 @@ namespace CandyCottage.CandyBot.Models
         public int Ttl { get; set; }
     }
 
+    public class ConsoleInputMessage : IBotMessage
+    {
+        public string Id => "";
+        public string Timestamp => DateTime.Now.ToString("u");
+        public string OpenId { get; set; } = "";
+        public string Detail { get; set; } = "";
+        public bool IsGroup { get; set; } = false;
+        public string AuthorOpenId { get; set; } = "";
+        public bool SendProactive { get; set; } = false;
+    }
+
     public class UploadMediaResult
     {
         /// <summary>
