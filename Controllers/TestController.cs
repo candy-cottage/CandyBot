@@ -4,11 +4,13 @@ using Microsoft.AspNetCore.Mvc;
 using Milimoe.FunGame.Core.Api.Transmittal;
 using Milimoe.FunGame.Core.Api.Utility;
 using Milimoe.FunGame.Core.Library.SQLScript.Common;
+using CandyCottage.CandyBot.Utilities;
 
 namespace CandyCottage.CandyBot.Controllers
 {
     [ApiController]
     [Route("[controller]")]
+    [DevelopmentOnly]
     public class TestController(ILogger<TestController> logger, SQLHelper sql) : ControllerBase
     {
         [HttpGet("gethmacsha512")]

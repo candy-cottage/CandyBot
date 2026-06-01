@@ -21,6 +21,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Exclude test projects that live under tests/; they have their own .csproj -->
+    <Compile Remove="tests\**" />
+    <Content Remove="tests\**" />
+    <EmbeddedResource Remove="tests\**" />
+    <None Remove="tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="FunGame.Core" Version="2.0.0" />
     <PackageReference Include="FunGame.SQLQueryExtension" Version="2.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />

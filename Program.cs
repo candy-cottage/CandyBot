@@ -51,6 +51,7 @@ builder.Services.AddScoped(SQLConnectionConfig.NewSQLHelper);
 builder.Services.AddScoped<SQLTableInitializeService>();
 builder.Services.AddHostedService<QQBotWebSocketService>();
 builder.Services.AddScoped<QQBotService>();
+builder.Services.AddScoped<IBotReplySender>(sp => sp.GetRequiredService<QQBotService>());
 builder.Services.AddScoped<SheetService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<BettingService>();
@@ -76,3 +77,6 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// 暴露 Program 类型供集成测试的 WebApplicationFactory<Program> 使用
+public partial class Program { }

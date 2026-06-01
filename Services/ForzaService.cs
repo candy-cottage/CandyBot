@@ -41,6 +41,12 @@ namespace CandyCottage.CandyBot.Services
             return (true, "success", dt, totalPages);
         }
 
+        public (bool success, string message, DataTable? data, int totalPages) GetVehicleById(int id)
+        {
+            sql.Parameters["@id"] = id;
+            return GetVehicleDataTable("WHERE Id = @id", 1, 1);
+        }
+
         public (bool success, string message, DataTable? data, int totalPages) GetVehicleInfoRaw(string vehicleName, int page)
         {
             if (string.IsNullOrWhiteSpace(vehicleName))

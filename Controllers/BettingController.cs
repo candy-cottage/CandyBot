@@ -150,7 +150,7 @@ namespace CandyCottage.CandyBot.Controllers
             [FromQuery] bool? isSettled = null)
         {
             // 简易管理员检查（可替换为实际鉴权）
-            if (!User.IsInRole("Admin") && !User.IsInRole("Operator"))
+            if (!User.IsInRole("admin") && !User.IsInRole("op"))
                 return Forbid();
 
             if (sql == null) return StatusCode(500, "数据库连接失败");

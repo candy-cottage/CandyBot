@@ -1,0 +1,99 @@
+name: Container
+
+# Trigger on pushes to main, version tags, and manual dispatch.
+# NOTE: We intentionally do NOT use workflow_run here because workflow_run
+# does not fire for tag pushes.  Instead we self-gate: this workflow
+# contains its own `test` job (fast suite + MySQL integration suite) and the
+# `build-push` job depends on it via `needs: test`.  The image is therefore
+# only built and pushed when the tests pass, regardless of whether the
+# trigger is a branch push or a semver tag.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write  # required to push to GHCR
+
+jobs:
+  # ── Full test gate ─────────────────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore CandyBot.sln
+
+      - name: Build
+        run: dotnet build CandyBot.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test CandyBot.sln --configuration Release --no-build --filter "Category!=MySql" --logger trx --collect:"XPlat Code Coverage" --results-directory TestResults
+
+      - name: Test (MySql)
+        run: dotnet test CandyBot.sln --configuration Release --no-build --filter "Category=MySql" --logger trx --results-directory TestResults-MySql
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-test-results
+          path: |
+            TestResults
+            TestResults-MySql
+
+  # ── Build and push container image (only if tests pass) ───────────────────
+  build-push:
+    runs-on: ubuntu-latest
+    needs: test  # gate: do not publish a broken image
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Produces tags:
+      #   • ghcr.io/<owner>/<repo>:main          (on main branch)
+      #   • ghcr.io/<owner>/<repo>:sha-<short>   (always)
+      #   • ghcr.io/<owner>/<repo>:<version>     (on v* tags, e.g. 1.2.3)
+      #   • ghcr.io/<owner>/<repo>:latest        (on v* tags)
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
