@@ -5,9 +5,8 @@ name: Publish
 # gating) does NOT fire for tag pushes — only for branch pushes. To guarantee
 # "tests must pass before publish" uniformly across main, tags, and
 # workflow_dispatch, this job is SELF-GATING: it runs restore → build → fast
-# test suite → publish in sequence, and only uploads the artifact if all steps
-# succeed. The MySQL (Category=MySql) tests are excluded here because they need
-# Docker/Testcontainers; they are covered by ci.yml's mysql-tests job.
+# test suite → MySQL integration suite → publish in sequence, and only uploads
+# the artifact if all steps succeed.
 on:
   push:
     branches:
@@ -38,10 +37,21 @@ jobs:
       - name: Build
         run: dotnet build CandyBot.sln --configuration Release --no-restore
 
-      # Self-gating test step: fast suite only (no Docker).
-      # MySQL tests (Category=MySql) are excluded — see ci.yml mysql-tests job.
+      # Self-gating test steps: both suites must pass before publish.
       - name: Test (fast suite, no Docker)
-        run: dotnet test CandyBot.sln --configuration Release --no-build --filter "Category!=MySql"
+        run: dotnet test CandyBot.sln --configuration Release --no-build --filter "Category!=MySql" --logger trx --results-directory TestResults
+
+      - name: Test (MySql)
+        run: dotnet test CandyBot.sln --configuration Release --no-build --filter "Category=MySql" --logger trx --results-directory TestResults-MySql
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: publish-test-results
+          path: |
+            TestResults
+            TestResults-MySql
 
       # Publish produces a self-contained directory ready for deployment.
       # UseAppHost=false omits the platform-specific native launcher so the output

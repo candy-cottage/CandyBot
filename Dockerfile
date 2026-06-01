@@ -26,11 +26,10 @@ EXPOSE 8080
 #   • /app/candybot.db – SQLite database (default DataSource "candybot" resolves to CWD)
 # Only the directory entry is chowned (non-recursive); the COPY'd binaries inside
 # remain root-owned and readable/executable, which is fine.
-# For persistence across restarts, mount a volume covering these paths, e.g.:
-#   -v /host/app:/app          (covers both configs and the SQLite DB)
-# or bind the specific paths:
+# For persistence across restarts, bind the mutable runtime paths:
 #   -v /host/configs:/app/configs
 #   -v /host/candybot.db:/app/candybot.db
+# Do not mount over /app itself; that would hide the published application files.
 # The SQLite location and DB backend are configurable via PluginConfig (sqlconfig).
 RUN chown $APP_UID /app
 

@@ -3,7 +3,7 @@ name: Container
 # Trigger on pushes to main, version tags, and manual dispatch.
 # NOTE: We intentionally do NOT use workflow_run here because workflow_run
 # does not fire for tag pushes.  Instead we self-gate: this workflow
-# contains its own `test` job (same fast suite as ci.yml) and the
+# contains its own `test` job (fast suite + MySQL integration suite) and the
 # `build-push` job depends on it via `needs: test`.  The image is therefore
 # only built and pushed when the tests pass, regardless of whether the
 # trigger is a branch push or a semver tag.
@@ -20,7 +20,7 @@ permissions:
   packages: write  # required to push to GHCR
 
 jobs:
-  # ── Fast test gate ─────────────────────────────────────────────────────────
+  # ── Full test gate ─────────────────────────────────────────────────────────
   test:
     runs-on: ubuntu-latest
     steps:
@@ -38,17 +38,20 @@ jobs:
       - name: Build
         run: dotnet build CandyBot.sln --configuration Release --no-restore
 
-      # MySql-tagged tests require Testcontainers/Docker and are excluded here
-      # to keep the gate fast.  They run separately in ci.yml.
       - name: Test
         run: dotnet test CandyBot.sln --configuration Release --no-build --filter "Category!=MySql" --logger trx --collect:"XPlat Code Coverage" --results-directory TestResults
+
+      - name: Test (MySql)
+        run: dotnet test CandyBot.sln --configuration Release --no-build --filter "Category=MySql" --logger trx --results-directory TestResults-MySql
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: container-test-results
-          path: TestResults
+          path: |
+            TestResults
+            TestResults-MySql
 
   # ── Build and push container image (only if tests pass) ───────────────────
   build-push:
