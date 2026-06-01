@@ -7,7 +7,7 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace CandyCottage.CandyBot.Services.BotServices
 {
-    public class QQBotService(BotConfig botConfig, ILogger<QQBotService> logger, IHttpClientFactory httpClientFactory, IMemoryCache memoryCache)
+    public class QQBotService(BotConfig botConfig, ILogger<QQBotService> logger, IHttpClientFactory httpClientFactory, IMemoryCache memoryCache) : IBotReplySender
     {
         private BotConfig BotConfig { get; set; } = botConfig;
         private ILogger<QQBotService> Logger { get; set; } = logger;
