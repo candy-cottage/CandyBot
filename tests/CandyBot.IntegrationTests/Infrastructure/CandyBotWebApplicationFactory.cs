@@ -1,3 +1,4 @@
+using CandyCottage.CandyBot.Utilities;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -32,7 +33,12 @@ public class CandyBotWebApplicationFactory : WebApplicationFactory<Program>
 
             // 2. 用替身替换 SQLHelper，控制器（TestController/ForzaService/BettingService）
             //    才能在没有真实数据库的情况下被激活。冒烟端点本身不执行任何 SQL。
+            //    同时移除具体的 MySQLHelper / SQLiteHelper 注册，防止测试意外打开
+            //    真实的 candybot.db 文件（它们在 Program.cs 中作为 scoped 注册，
+            //    是为 SQLTableInitializeService 的 is 类型判断而存在的）。
             services.RemoveAll<SQLHelper>();
+            services.RemoveAll<MySQLHelper>();
+            services.RemoveAll<SQLiteHelper>();
             services.AddScoped(_ => Substitute.For<SQLHelper>());
 
             // 3. 替换 IHttpClientFactory，保证测试期间没有任何出站 HTTP 能离开进程。
