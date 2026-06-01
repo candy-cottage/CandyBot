@@ -1,0 +1,57 @@
+name: Publish
+
+# Triggers: pushes to main, version tags (v*), and manual dispatch.
+# v* tags are needed for release artifacts, but `on: workflow_run` (cross-workflow
+# gating) does NOT fire for tag pushes — only for branch pushes. To guarantee
+# "tests must pass before publish" uniformly across main, tags, and
+# workflow_dispatch, this job is SELF-GATING: it runs restore → build → fast
+# test suite → publish in sequence, and only uploads the artifact if all steps
+# succeed. The MySQL (Category=MySql) tests are excluded here because they need
+# Docker/Testcontainers; they are covered by ci.yml's mysql-tests job.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore CandyBot.sln
+
+      - name: Build
+        run: dotnet build CandyBot.sln --configuration Release --no-restore
+
+      # Self-gating test step: fast suite only (no Docker).
+      # MySQL tests (Category=MySql) are excluded — see ci.yml mysql-tests job.
+      - name: Test (fast suite, no Docker)
+        run: dotnet test CandyBot.sln --configuration Release --no-build --filter "Category!=MySql"
+
+      # Publish produces a self-contained directory ready for deployment.
+      # UseAppHost=false omits the platform-specific native launcher so the output
+      # is framework-dependent and smaller. The scripts/ folder (SQL init files)
+      # is included automatically via CopyToOutputDirectory in CandyBot.csproj.
+      - name: Publish
+        run: dotnet publish CandyBot.csproj --configuration Release --output artifacts/publish /p:UseAppHost=false
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: candybot-publish
+          path: artifacts/publish
