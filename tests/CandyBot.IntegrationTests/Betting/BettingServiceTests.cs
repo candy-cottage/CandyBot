@@ -77,8 +77,8 @@ public class BettingServiceTests(MySqlFixture fixture)
             .Should().BeTrue(evtErr);
         eventId.Should().NotBeNull();
 
-        DateTime start = startTime ?? FixedNow.AddDays(1);
-        DateTime ddl = betDeadline ?? FixedNow.AddDays(1);
+        DateTime start = startTime ?? DateTime.Now.AddDays(1);
+        DateTime ddl = betDeadline ?? DateTime.Now.AddDays(1);
         bool ok = service.CreateMatch(
             (int)eventId!.Value, "队伍A", "队伍B", "小组赛",
             start, ddl, options, team1Odds, team2Odds, null, enableBet,
@@ -420,8 +420,8 @@ public class BettingServiceTests(MySqlFixture fixture)
     [Fact]
     public void CalculateOdds_按胜率与水位计算()
     {
-        using MySQLHelper sql = _fixture.CreateHelper();
-        BettingService service = new(sql, new CandyBotFunctionConfig());
+        // CalculateOdds 是纯算术，不触碰数据库；null! SQLHelper 不会被解引用。
+        BettingService service = new(null!, new CandyBotFunctionConfig());
         var (oddsA, oddsB) = service.CalculateOdds(0.5m, 0.08m);
         // 1 / (0.5 * 1.08) = 1.851... → 1.85（两位四舍五入）
         oddsA.Should().Be(1.85m);
