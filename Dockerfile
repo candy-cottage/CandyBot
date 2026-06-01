@@ -21,13 +21,18 @@ COPY --from=build /app/publish .
 # and define APP_UID (typically 1654) with a matching non-root user "app".
 EXPOSE 8080
 
-# Pre-create the directory that PluginConfig writes to so the non-root user
-# can create files there at runtime.  Operators should mount a host directory
-# over /app/configs (and optionally /app/data for SQLite) to persist state
-# across container restarts, e.g.:
+# Give the non-root user ownership of /app so it can create runtime state there:
+#   • /app/configs/   – PluginConfig files (candybot.functions, sqlconfig, etc.)
+#   • /app/candybot.db – SQLite database (default DataSource "candybot" resolves to CWD)
+# Only the directory entry is chowned (non-recursive); the COPY'd binaries inside
+# remain root-owned and readable/executable, which is fine.
+# For persistence across restarts, mount a volume covering these paths, e.g.:
+#   -v /host/app:/app          (covers both configs and the SQLite DB)
+# or bind the specific paths:
 #   -v /host/configs:/app/configs
-#   -v /host/data:/app/data
-RUN mkdir -p /app/configs && chown $APP_UID /app/configs
+#   -v /host/candybot.db:/app/candybot.db
+# The SQLite location and DB backend are configurable via PluginConfig (sqlconfig).
+RUN chown $APP_UID /app
 
 # Run as the non-root "app" user provided by the base image ($APP_UID ≈ 1654).
 USER $APP_UID

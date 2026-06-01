@@ -41,7 +41,14 @@ jobs:
       # MySql-tagged tests require Testcontainers/Docker and are excluded here
       # to keep the gate fast.  They run separately in ci.yml.
       - name: Test
-        run: dotnet test CandyBot.sln -c Release --filter "Category!=MySql"
+        run: dotnet test CandyBot.sln --configuration Release --no-build --filter "Category!=MySql" --logger trx --collect:"XPlat Code Coverage" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-test-results
+          path: TestResults
 
   # ── Build and push container image (only if tests pass) ───────────────────
   build-push:
