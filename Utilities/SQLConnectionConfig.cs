@@ -54,6 +54,12 @@ namespace CandyCottage.CandyBot.Utilities
             return scsb.ToString();
         }
 
+        /// <summary>
+        /// 优先级：环境变量 &gt; PluginConfig &gt; 默认值。
+        /// 环境变量：CANDYBOT_SQL_MODE(enum) / CANDYBOT_SQL_DATASOURCE / CANDYBOT_SQL_PORT /
+        /// CANDYBOT_SQL_DATABASE / CANDYBOT_SQL_USER / CANDYBOT_SQL_PASSWORD。
+        /// 环境变量覆盖仅作用于内存，不写回配置文件。
+        /// </summary>
         public void Init()
         {
             SQLConfig.LoadConfig();
@@ -68,6 +74,14 @@ namespace CandyCottage.CandyBot.Utilities
             User = SQLConfig.GetOrAdd("User", User) ?? "";
             Password = SQLConfig.GetOrAdd("Password", Password) ?? "";
             SQLConfig.SaveConfig();
+
+            // 环境变量覆盖（在 SaveConfig 之后，仅内存生效，不持久化注入的机密）。
+            Mode = ConfigEnv.Override("CANDYBOT_SQL_MODE", Mode);
+            DataSource = ConfigEnv.Override("CANDYBOT_SQL_DATASOURCE", DataSource);
+            Port = ConfigEnv.Override("CANDYBOT_SQL_PORT", Port);
+            DataBase = ConfigEnv.Override("CANDYBOT_SQL_DATABASE", DataBase);
+            User = ConfigEnv.Override("CANDYBOT_SQL_USER", User);
+            Password = ConfigEnv.Override("CANDYBOT_SQL_PASSWORD", Password);
         }
     }
 }
