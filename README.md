@@ -64,7 +64,11 @@ dotnet build
 | `Models/` | QQ 消息模型、按钮/键盘构建、DTO、腾讯文档模型 |
 | `Utilities/` | SQL Helper、配置类、工具、功能开关实现 |
 | `Entities/` | 经营模拟游戏实体模型（半成品） |
-| `Scripts/` | SQL 建表脚本（`fungame.sql` / `fungame_sqlite.sql` / `betting.sql` / `candybot.sql` / `forza.sql`） |
+| `Modules/` | FunGame 游戏模块（角色 / 技能 / 道具，糖果屋脚手架） |
+| `Interfaces/` | 本地接口定义（如 `IBackgroundTaskQueue`） |
+| `Views/` | Razor 视图（腾讯文档表格查看器 `Sheet/viewer.cshtml`） |
+| `configs/` | 运行时数据配置（如 `candy-cottage/extend-items.json`） |
+| `scripts/` | SQL 建表脚本（`fungame.sql` / `fungame_sqlite.sql` / `betting.sql` / `candybot.sql` / `forza.sql`） |
 
 ## 核心模块
 
@@ -93,12 +97,14 @@ dotnet build
 
 ## HTTP API 概览
 
-- `GET /betting/events`
-- `GET /betting/matches`
-- `GET /forza/vehicles`
+- `GET /betting/events` / `GET /betting/events/{id}`
+- `GET /betting/matches` / `GET /betting/matches/{id}`
+- `GET /betting/bets`
+- `GET /forza/vehicles` / `GET /forza/vehicles/{id}` / `GET /forza/vehicles/match`（匿名只读；`POST` / `PUT` / `DELETE /forza/vehicles` 需 admin/op 角色）
 - `GET /sheet/{fileId}`
 - `GET /sheet/file/{fileId}`
 - `GET /sheet/view?fileId={fileId}`
+- `GET /Test/...`（加密 / 测试辅助接口）
 
 ## 其他说明
 
