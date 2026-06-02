@@ -32,6 +32,20 @@ public partial class CandyBotService
                 return true;
             }
 
+            // 占位：查赛道尚未实现。必须在此截断（return true），否则指令会穿透到
+            // HandleToggleCommand 的权限闸，给用户回出"无权限/创建存档"等牛头不对马嘴的提示。
+            if (e.Detail.StartsWith("查赛道"))
+            {
+                md.Content = "🛣️ 赛道查询功能正在开发中，敬请期待～";
+                reply.Keyboard = new KeyboardMessage()
+                    .AppendButtons(3,
+                        Button.CreateCmdButton("🏎 查车", "查车", false),
+                        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
+                        Button.CreateCmdButton("📊 查等级", "查等级", false));
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
             if (e.Detail.StartsWith("查车"))
             {
                 string detail = e.Detail["查车".Length..].Trim();
