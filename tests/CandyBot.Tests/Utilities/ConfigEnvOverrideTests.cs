@@ -185,4 +185,34 @@ public class ConfigEnvOverrideTests
             config.UseSandbox.Should().BeFalse("无法解析为 bool 的环境变量不应覆盖原值");
         });
     }
+
+    [Fact]
+    public void DeepSeekConfig_环境变量优先于持久化值且不写回()
+    {
+        WithEnvAndTempRoot(new Dictionary<string, string?>
+        {
+            ["CANDYBOT_DEEPSEEK_APIKEY"] = "env-key",
+            ["CANDYBOT_DEEPSEEK_MODEL"] = "deepseek-v4-pro",
+            ["CANDYBOT_DEEPSEEK_ENABLED"] = "true",
+        }, () =>
+        {
+            PluginConfig seed = new("candybot", "deepseek");
+            seed.LoadConfig();
+            seed["ApiKey"] = "disk-key";
+            seed["Model"] = "deepseek-v4-flash";
+            seed["Enabled"] = false;
+            seed.SaveConfig();
+
+            DeepSeekConfig config = new();
+            config.Init();
+
+            config.ApiKey.Should().Be("env-key");
+            config.Model.Should().Be("deepseek-v4-pro");
+            config.Enabled.Should().BeTrue();
+
+            PluginConfig reloaded = new("candybot", "deepseek");
+            reloaded.LoadConfig();
+            (reloaded.GetOrAdd("ApiKey", "") ?? "").Should().Be("disk-key");
+        });
+    }
 }

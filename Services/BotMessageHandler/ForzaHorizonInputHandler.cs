@@ -32,6 +32,33 @@ public partial class CandyBotService
                 return true;
             }
 
+            if (e.Detail.StartsWith("同步车辆表"))
+            {
+                if (!await CheckUser(e, user, false))
+                {
+                    return true;
+                }
+
+                ForzaSheetSyncReport report = await forzaSheetImporter.SyncAsync(ForzaSheetImporter.DefaultVehicleSheetFileId);
+                if (report.Success)
+                {
+                    md.Content =
+                        $"✅ 已同步 {report.InsertedVehicleCount} 辆车辆。\r\n" +
+                        $"原表：{report.PreviousVehicleCount} 辆；解析：{report.ParsedVehicleCount} 辆；工作表：{report.ParsedSheetNames.Count} 张。\r\n" +
+                        $"跳过工作表：{report.SkippedSheetNames.Count} 张；跳过行：{report.SkippedRows.Count} 行。" +
+                        (report.Diagnostics.Count > 0 ? "\r\n诊断：" + string.Join("\r\n", report.Diagnostics.Take(3)) : "");
+                }
+                else
+                {
+                    md.Content =
+                        $"❌ 同步车辆表失败：{report.ErrorMessage}\r\n" +
+                        $"旧数据已保留。当前原表记录：{report.PreviousVehicleCount} 辆；解析：{report.ParsedVehicleCount} 辆。";
+                }
+
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
             // 占位：查赛道尚未实现。必须在此截断（return true），否则指令会穿透到
             // HandleToggleCommand 的权限闸，给用户回出"无权限/创建存档"等牛头不对马嘴的提示。
             if (e.Detail.StartsWith("查赛道"))

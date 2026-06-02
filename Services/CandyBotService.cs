@@ -12,7 +12,7 @@ using ProjectRedbud.FunGame.SQLQueryExtension;
 namespace CandyCottage.CandyBot.Services
 {
     public partial class CandyBotService(ILogger<CandyBotService> logger, IMemoryCache memoryCache, SQLHelper sql, CandyBotFunctionConfig functionConfig, IBackgroundTaskQueue taskQueue,
-        IBotReplySender botService, BettingService bettingService, SQLTableInitializeService sqlInitService, UserService userService, ForzaService forzaService)
+        IBotReplySender botService, BettingService bettingService, SQLTableInitializeService sqlInitService, UserService userService, ForzaService forzaService, IForzaSheetImporter forzaSheetImporter)
     {
         public async Task Handler(IBotMessage e)
         {

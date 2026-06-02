@@ -24,4 +24,10 @@
     <ProjectReference Include="..\..\CandyBot.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\Fixtures\Forza\*.json" Link="Fixtures\Forza\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

@@ -41,6 +41,7 @@ builder.Services.AddSingleton<BotConfig>();
 builder.Services.AddSingleton<SQLConnectionConfig>();
 builder.Services.AddSingleton<CandyBotFunctionConfig>();
 builder.Services.AddSingleton<TencentDocsConfig>();
+builder.Services.AddSingleton<DeepSeekConfig>();
 builder.Services.AddSingleton<CharacterModule>();
 builder.Services.AddSingleton<ItemModule>();
 builder.Services.AddSingleton<SkillModule>();
@@ -58,6 +59,16 @@ builder.Services.AddScoped<SheetService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<BettingService>();
 builder.Services.AddScoped<ForzaService>();
+builder.Services.AddScoped<NoOpSheetParseDiagnostic>();
+builder.Services.AddScoped<DeepSeekSheetParseDiagnostic>();
+builder.Services.AddScoped<ISheetParseDiagnostic>(sp =>
+{
+    DeepSeekConfig config = sp.GetRequiredService<DeepSeekConfig>();
+    return config.Enabled && !string.IsNullOrWhiteSpace(config.ApiKey)
+        ? sp.GetRequiredService<DeepSeekSheetParseDiagnostic>()
+        : sp.GetRequiredService<NoOpSheetParseDiagnostic>();
+});
+builder.Services.AddScoped<IForzaSheetImporter, ForzaSheetImporter>();
 builder.Services.AddScoped<CandyBotService>();
 builder.Services.AddHostedService<SystemInitializedService>();
 builder.Services.AddHostedService<ConsoleInputService>();
