@@ -112,15 +112,15 @@ namespace CandyCottage.CandyBot.Services
 
         private async Task<bool> HandleToggleCommand(IBotMessage e, User? user)
         {
-            if (!await CheckUser(e, user))
-            {
-                return true;
-            }
-
             string detail = e.Detail;
             if (!detail.StartsWith("开启") && !detail.StartsWith("关闭"))
             {
                 return false;
+            }
+
+            if (!await CheckUser(e, user))
+            {
+                return true;
             }
 
             string action = detail[..2];
