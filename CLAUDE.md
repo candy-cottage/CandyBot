@@ -27,7 +27,10 @@ dotnet ef <args>                  # EF Core CLI（工具版本锁定为 10.0.8�
 
 - 在 Development 环境下，OpenAPI + Scalar API 文档在 `/scalar` 提供（启动配置会自动打开）。
 - HTTP：`http://localhost:5139`；HTTPS：`https://localhost:7090`。
-- **本项目没有测试工程或测试框架。** `Utilities/Tests.cs` 是一个手动演示用的辅助类（发送示例消息），并非自动化测试。不要假定 `dotnet test` 会执行任何有意义的内容。
+- **测试工程位于 `tests/`**（已纳入 `CandyBot.sln`，CI 中以 mysql 服务为前置条件运行）：
+  - `CandyBot.Tests/` —— 纯单元测试（xUnit + FluentAssertions + NSubstitute，含 `Fakes/RecordingBotReplySender` 等替身），覆盖处理器链路由、权限闸、功能开关、配置环境变量覆盖、后台任务队列等。**不依赖数据库**，`dotnet test tests/CandyBot.Tests` 可直接运行。
+  - `CandyBot.IntegrationTests/` —— 真实 MySQL 集成测试（xUnit + FluentAssertions + **Testcontainers**，共享一个 `mysql:8.0` 容器经 `MySqlFixture` 灌入四个建表脚本），覆盖 Betting / Forza / Auth / SQL 初始化 / 行锁 / Smoke。**需要可用的 Docker** 才能运行。
+  - 注意：`Utilities/Tests.cs` 不是自动化测试，而是手动演示用的辅助类（发送示例消息）。
 
 ## 必须理解的外部依赖
 
@@ -209,3 +212,11 @@ QQBotWebSocketService (BackgroundService)
 - 根命名空间为 `CandyCottage.CandyBot`（注意：程序集名为 `CandyBot`）。
 - 日志通过 `ILogger` 结构化输出；开销较大的日志用 `logger.IsEnabled(LogLevel.X)` 守卫。不要使用 `Console.WriteLine`。
 - 新增指令域时：创建 `Services/BotMessageHandler/XxxInputHandler.cs`（`partial class CandyBotService`），在 `Handler` 方法中的处理器链里插入调用，确保前缀匹配优先级正确，在 `CandyBotFunctionConfig` 中添加对应开关（如需运行时控制）。
+
+## 代码审查
+
+审查 PR 或本地改动（包括评审本仓库的 diff）时遵循：
+
+- 重点排查可能的缺陷（bug）、回归、缺失的测试，以及有风险的行为变更。
+- 优先给出高信号的发现，而非风格类评论。
+- 当风险足够大时，把"行为变更缺少测试"视为 P1（最高优先级）问题——本仓库已有单元 + 集成测试工程（见「常用命令」），核心逻辑的行为变更应配套测试。

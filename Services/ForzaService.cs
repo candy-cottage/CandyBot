@@ -369,53 +369,20 @@ namespace CandyCottage.CandyBot.Services
             }
         }
 
+        // 面向聊天机器人的查询：复用 GetVehicleDataTable 取数 + 分页，再渲染为卡片文本。
+        // 取数/计数/分页逻辑只此一处（GetVehicleDataTable），此方法只负责"空结果文案 + 呈现"。
         private (bool, string) ExecuteVehicleQuery(string whereClause, int page, out int totalPages)
         {
-            totalPages = page;
-            if (page < 1) page = 1;
-            const int pageSize = 12;
-            int offset = (page - 1) * pageSize;
-
-            string query = $@"
-                SELECT 
-                    Class, MatchType, Manufacturer, Model, Year, Drivetrain,
-                    Attribute, TireCompound, SurfaceCondition, Strength, Tune, Remarks, LapTime
-                FROM Vehicles
-                {whereClause}
-                ORDER BY Class, Manufacturer, Model
-                LIMIT {offset}, {pageSize}";
-
-            sql.ClearParametersAfterExecute = false;
-            sql.ExecuteDataSet(query);
-            sql.ClearParametersAfterExecute = true;
-            if (!sql.Success)
+            var (success, _, data, pages) = GetVehicleDataTable(whereClause, page);
+            totalPages = pages;
+            if (!success || data == null)
                 return (false, "查询失败，请稍后重试。");
 
-            DataTable dt = sql.DataSet.Tables[0];
-            if (dt.Rows.Count == 0)
+            if (data.Rows.Count == 0)
                 return (false, whereClause.Contains("LIKE") ? "未找到相关车辆。" : "未找到符合条件的车辆。");
 
-            // 生成 Markdown 表格
-            StringBuilder sb = new();
-            sb.AppendLine("| 等级 | 比赛类型 | 制造商 | 型号 | 年份 | 传动 | 属性 | 胎面 | 干/湿 | 强度 | 调校 | 备注 | 圈速 |");
-            sb.AppendLine("|------|----------|--------|------|------|------|------|------|-------|------|------|------|------|");
-
-            foreach (DataRow row in dt.Rows)
-            {
-                sb.AppendLine($"| {EscapeMarkdownCell(row["Class"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["MatchType"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["Manufacturer"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["Model"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["Year"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["Drivetrain"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["Attribute"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["TireCompound"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["SurfaceCondition"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["Strength"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["Tune"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["Remarks"]?.ToString() ?? "")} | {EscapeMarkdownCell(row["LapTime"]?.ToString() ?? "")} |");
-            }
-
-            // 计算总页数
-            string countQuery = $"SELECT COUNT(*) FROM Vehicles {whereClause}";
-            DataRow? dr = sql.ExecuteDataRow(countQuery);
-            int totalCount = 0;
-            if (sql.Success && dr != null)
-                _ = int.TryParse(dr[0].ToString(), out totalCount);
-
-            if (totalCount > page * pageSize)
-                totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
-
-            return (true, sb.ToString());
+            // 渲染为卡片/分行布局：每辆车一张卡片，只输出非空字段，移动端比 13 列宽表更易读
+            return (true, RenderVehiclesAsCards(data));
         }
 
         private void AddSetClause(List<string> clauses, string columnName, string? value)
@@ -436,12 +403,51 @@ namespace CandyCottage.CandyBot.Services
             }
         }
 
-        private static string EscapeMarkdownCell(string text)
+        /// <summary>
+        /// 将车辆查询结果渲染为「卡片/分行」式 Markdown 文本，每辆车一张卡片，卡片间用分隔线隔开。
+        /// 只输出非空字段，避免空列占据移动端消息卡片的宽度。这是纯呈现逻辑，不触碰数据库——
+        /// 调用方负责传入已查好的 DataTable（列须包含 Id 及各车辆字段）。
+        /// </summary>
+        private static string RenderVehiclesAsCards(DataTable dt)
         {
-            if (string.IsNullOrEmpty(text))
-                return "";
-            // 替换管道符为 \|，替换换行符为空格
-            return text.Replace("|", "\\|").Replace("\n", " ").Replace("\r", "");
+            StringBuilder sb = new();
+            for (int i = 0; i < dt.Rows.Count; i++)
+            {
+                DataRow row = dt.Rows[i];
+                string Cell(string col) => dt.Columns.Contains(col) ? (row[col]?.ToString() ?? "").Trim() : "";
+
+                // 标题行：制造商 型号 (年份) · 等级/类型 · ID —— ID 让管理员能直接「修改车辆 <ID>」
+                string title = $"🏎 {Cell("Manufacturer")} {Cell("Model")}".TrimEnd();
+                title += Prefix(" ", Cell("Year") == "" ? "" : $"({Cell("Year")})");
+                title += $" · {Cell("Class")}/{Cell("MatchType")}";
+                title += Prefix(" · ID ", Cell("Id"));
+                sb.AppendLine(title);
+
+                // 传动 | 属性 | 强度
+                AppendLineIfAny(sb, JoinNonEmpty(" | ", Cell("Drivetrain"), Cell("Attribute"), Prefix("强度 ", Cell("Strength"))));
+                // 胎面 · 干/湿
+                AppendLineIfAny(sb, JoinNonEmpty(" · ", Prefix("胎面 ", Cell("TireCompound")), Cell("SurfaceCondition")));
+                AppendLineIfAny(sb, Prefix("调校 ", Cell("Tune")));
+                AppendLineIfAny(sb, Prefix("备注 ", Cell("Remarks")));
+                AppendLineIfAny(sb, Prefix("圈速 ", Cell("LapTime")));
+
+                if (i < dt.Rows.Count - 1) sb.AppendLine("━━━━━━━━━━━━━━━");
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>用分隔符连接若干字段，自动跳过空白片段（避免出现 "四驱 |  | 强度" 这类空洞）。</summary>
+        private static string JoinNonEmpty(string separator, params string[] parts)
+            => string.Join(separator, parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+
+        /// <summary>给非空值加前缀标签；值为空白时返回空串（连标签一起省略）。</summary>
+        private static string Prefix(string label, string value)
+            => string.IsNullOrWhiteSpace(value) ? "" : label + value;
+
+        /// <summary>仅当文本非空白时才追加一行，避免输出空行。</summary>
+        private static void AppendLineIfAny(StringBuilder sb, string line)
+        {
+            if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine(line);
         }
 
         private static string EscapeLikeWildcards(string input)
