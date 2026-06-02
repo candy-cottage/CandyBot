@@ -1,5 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.Data;
+﻿using System.Data;
 using System.Text;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Utilities;
@@ -353,8 +352,7 @@ namespace CandyCottage.CandyBot.Services
                 DataTable dt = sql.DataSet.Tables[0];
                 foreach (DataRow row in dt.Rows)
                 {
-                    string matchTypeDisplay = GetEnumDisplayName<MatchType>(row["MatchType"]?.ToString() ?? "");
-                    string display = $"{row["Manufacturer"]} {row["Model"]} ({row["Year"]}) [{row["Class"]}/{matchTypeDisplay}]";
+                    string display = $"{row["Manufacturer"]} {row["Model"]} ({row["Year"]}) [{row["Class"]}/{row["MatchType"]}]";
                     matches.Add(new VehicleMatch
                     {
                         Id = Convert.ToInt32(row["Id"]),
@@ -436,26 +434,6 @@ namespace CandyCottage.CandyBot.Services
                 sql.Parameters[$"@{columnName}"] = value;
                 clauses.Add(($"{(clauses.Count == 0 ? "WHERE " : "AND ")}{columnName} = @{columnName}"));
             }
-        }
-
-        private static string GetEnumDisplayName<TEnum>(string value) where TEnum : struct, Enum
-        {
-            if (string.IsNullOrEmpty(value))
-                return "";
-
-            // 尝试匹配枚举成员（忽略大小写）
-            foreach (System.Reflection.FieldInfo field in typeof(TEnum).GetFields())
-            {
-                if (field.FieldType != typeof(TEnum)) continue;
-                DisplayAttribute? displayAttr = field.GetCustomAttributes(typeof(DisplayAttribute), false).FirstOrDefault() as DisplayAttribute;
-                string displayName = displayAttr?.Name ?? field.Name;
-                // 比较数据库值和枚举名称或显示名称
-                if (string.Equals(value, field.Name, StringComparison.OrdinalIgnoreCase) || string.Equals(value, displayName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return displayName ?? field.Name;
-                }
-            }
-            return value;
         }
 
         private static string EscapeMarkdownCell(string text)
