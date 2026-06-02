@@ -241,11 +241,38 @@ namespace CandyCottage.CandyBot.Services
             try
             {
                 sql.NewTransaction();
+                if (!InsertVehicle(request, out error))
+                {
+                    return false;
+                }
+                sql.Commit();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "AddVehicle error: {Message}", ex.Message);
+                error = $"新增车辆异常：{ex.Message}";
+                return false;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
 
-                // 构建 INSERT 语句
+        /// <summary>
+        /// 构建并执行单条车辆 INSERT，<b>不开启自身事务</b>——由调用方负责事务边界
+        /// （commit / rollback）。这使得导入器可以在一个外层事务内 DELETE + 循环插入 N 辆车，
+        /// 任一失败即整体回滚。<c>AddVehicle</c> 在校验必填字段后包一层事务委托至此。
+        /// </summary>
+        /// <remarks>internal 仅为便于集成测试直接验证「外层事务可回滚本插入」（见 InternalsVisibleTo）。</remarks>
+        internal bool InsertVehicle(VehicleRequest request, out string error)
+        {
+            error = "";
+            try
+            {
                 List<string> columns = [];
                 List<string> values = [];
-
                 AddField(columns, values, "Manufacturer", request.Manufacturer);
                 AddField(columns, values, "Model", request.Model);
                 AddField(columns, values, "Year", request.Year);
@@ -263,25 +290,18 @@ namespace CandyCottage.CandyBot.Services
 
                 string insertSql = $"INSERT INTO Vehicles ({string.Join(", ", columns)}) VALUES ({string.Join(", ", values)})";
                 sql.Execute(insertSql);
-
                 if (!sql.Success)
                 {
                     error = "新增车辆失败，请稍后重试。";
                     return false;
                 }
-
-                sql.Commit();
                 return true;
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "AddVehicle error: {Message}", ex.Message);
+                logger.LogError(ex, "InsertVehicle error: {Message}", ex.Message);
                 error = $"新增车辆异常：{ex.Message}";
                 return false;
-            }
-            finally
-            {
-                sql.Rollback();
             }
         }
 

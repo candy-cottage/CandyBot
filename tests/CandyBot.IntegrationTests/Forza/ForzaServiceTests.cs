@@ -176,6 +176,23 @@ public class ForzaServiceTests(MySqlFixture fixture)
         data.Rows[0]["Model"].ToString().Should().Be("Civic");
     }
 
+    [Fact]
+    public async Task InsertVehicle_不开启自身事务_可由外层事务回滚()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+
+        sql.NewTransaction();
+        bool ok = svc.InsertVehicle(MinimalVehicle("RollbackMaker", "RollbackModel", "A", "公路", "四驱"), out string error);
+        ok.Should().BeTrue(error);
+        sql.Rollback();
+
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? row = probe.ExecuteDataRow("SELECT COUNT(*) FROM Vehicles WHERE Manufacturer='RollbackMaker'");
+        Convert.ToInt32(row![0]).Should().Be(0);
+    }
+
     // =========================================================================
     // UpdateVehicle
     // =========================================================================

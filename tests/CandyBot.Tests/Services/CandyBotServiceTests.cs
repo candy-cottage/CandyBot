@@ -28,7 +28,8 @@ public class CandyBotServiceTests
         CandyBotFunctionConfig? functionConfig = null,
         IMemoryCache? memoryCache = null,
         Milimoe.FunGame.Core.Api.Transmittal.SQLHelper sql = null!,
-        BettingService bettingService = null!) =>
+        BettingService bettingService = null!,
+        IForzaSheetImporter forzaSheetImporter = null!) =>
         new(
             NullLogger<CandyBotService>.Instance,
             memoryCache!,
@@ -39,7 +40,8 @@ public class CandyBotServiceTests
             bettingService,
             sqlInitService: null!,
             userService: null!,
-            forzaService: null!);
+            forzaService: null!,
+            forzaSheetImporter);
 
     private static MemoryCache NewCache() => new(new MemoryCacheOptions());
 
@@ -270,5 +272,34 @@ public class CandyBotServiceTests
         // 赛事详情分支（GetEventDetail）的输出，绝不会出现在「赛事列表」分支（GetEventsOverview）中。
         content.Should().Be("赛事不存在。");
         content.Should().NotContain("赛事列表");
+    }
+
+    // ---- Handler: 同步车辆表 (Forza sheet sync) -------------------------
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_同步车辆表_管理员触发导入并收到摘要()
+    {
+        RecordingBotReplySender sender = new();
+        IForzaSheetImporter importer = Substitute.For<IForzaSheetImporter>();
+        importer.SyncAsync(ForzaSheetImporter.DefaultVehicleSheetFileId, Arg.Any<CancellationToken>())
+            .Returns(new ForzaSheetSyncReport(
+                Success: true,
+                PreviousVehicleCount: 128,
+                ParsedVehicleCount: 157,
+                InsertedVehicleCount: 157,
+                ParsedSheetNames: ["B-600公路", "C-500公路"],
+                SkippedSheetNames: ["季节赛推荐调校（每周更新）"],
+                SkippedRows: [],
+                Diagnostics: [],
+                ErrorMessage: null));
+
+        CandyBotService svc = CreateService(sender, AllOn(), forzaSheetImporter: importer);
+        C2CMessage e = TestData.CreateMessage("同步车辆表");
+
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        await importer.Received(1).SyncAsync(ForzaSheetImporter.DefaultVehicleSheetFileId, Arg.Any<CancellationToken>());
+        sender.TextContents.Single().Should().Contain("已同步 157 辆");
     }
 }

@@ -23,6 +23,7 @@
   <ItemGroup>
     <!-- 让单元测试工程可访问 internal 成员（如 ForzaService.RenderVehiclesAsCards 纯渲染逻辑） -->
     <InternalsVisibleTo Include="CandyBot.Tests" />
+    <InternalsVisibleTo Include="CandyBot.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,6 +32,11 @@
     <Content Remove="tests\**" />
     <EmbeddedResource Remove="tests\**" />
     <None Remove="tests\**" />
+    <!-- Exclude tmp/ (untracked scratch files, e.g. standalone importers) -->
+    <Compile Remove="tmp\**" />
+    <Content Remove="tmp\**" />
+    <EmbeddedResource Remove="tmp\**" />
+    <None Remove="tmp\**" />
   </ItemGroup>
 
   <ItemGroup>
