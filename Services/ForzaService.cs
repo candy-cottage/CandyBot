@@ -408,7 +408,8 @@ namespace CandyCottage.CandyBot.Services
         /// 只输出非空字段，避免空列占据移动端消息卡片的宽度。这是纯呈现逻辑，不触碰数据库——
         /// 调用方负责传入已查好的 DataTable（列须包含 Id 及各车辆字段）。
         /// </summary>
-        private static string RenderVehiclesAsCards(DataTable dt)
+        /// <remarks>internal 仅为便于 CandyBot.Tests 直接对纯渲染逻辑做单元测试（见 InternalsVisibleTo）。</remarks>
+        internal static string RenderVehiclesAsCards(DataTable dt)
         {
             StringBuilder sb = new();
             for (int i = 0; i < dt.Rows.Count; i++)
