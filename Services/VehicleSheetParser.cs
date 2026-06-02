@@ -115,6 +115,9 @@ internal static class VehicleSheetParser
         => row.Any(c => c.Contains("制造商", StringComparison.OrdinalIgnoreCase)) &&
            row.Any(c => c.Contains("型号", StringComparison.OrdinalIgnoreCase));
 
+    internal static bool ContainsHeaderPairInGrid(IReadOnlyList<IReadOnlyList<string>> grid)
+        => grid.Any(ContainsHeaderPair);
+
     /// <summary>
     /// 构建 表头单元格文本 → 列下标 的映射。Fix #1：保留首个匹配的表头，绝不被后出现的同名表头覆盖。
     /// 主表与右侧 Purist专区 共享同一物理行时，制造商/型号会出现两次；首匹配优先保证指向主表列。
