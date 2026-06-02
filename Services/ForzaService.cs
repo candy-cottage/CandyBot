@@ -437,14 +437,14 @@ namespace CandyCottage.CandyBot.Services
                 DataRow row = dt.Rows[i];
                 string Cell(string col) => dt.Columns.Contains(col) ? (row[col]?.ToString() ?? "").Trim() : "";
 
-                // 标题行：制造商 型号 (年份) · 等级/类型 · ID —— ID 让管理员能直接「修改车辆 <ID>」
-                string title = $"🏎 **{Cell("Manufacturer")} {Cell("Model")}".TrimEnd();
+                // 标题行：制造商 型号 (年份) · 等级/类型
+                string title = $"**{Cell("Manufacturer")} {Cell("Model")}".TrimEnd();
                 title += Prefix(" ", Cell("Year") == "" ? "" : $"({Cell("Year")})");
                 title += $" · {Cell("Class")}/{Cell("MatchType")}**\r\n> ";
                 sb.Append(title);
 
                 // 传动 | 属性 | 强度
-                AppendLineIfAny(sb, JoinNonEmpty(" | ", $"#{Cell("Id")}", Cell("Drivetrain"), Cell("Attribute"), Prefix("强度：", Cell("Strength"))));
+                AppendLineIfAny(sb, JoinNonEmpty(" | ", Cell("Drivetrain"), Cell("Attribute"), Prefix("强度：", Cell("Strength"))));
                 // 胎面 · 干/湿
                 AppendLineIfAny(sb, JoinNonEmpty(" · ", Prefix("胎面：", Cell("TireCompound")), Cell("SurfaceCondition")));
                 AppendLineIfAny(sb, Prefix("调校：", Cell("Tune")));
