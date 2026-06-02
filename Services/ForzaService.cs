@@ -369,46 +369,20 @@ namespace CandyCottage.CandyBot.Services
             }
         }
 
+        // 面向聊天机器人的查询：复用 GetVehicleDataTable 取数 + 分页，再渲染为卡片文本。
+        // 取数/计数/分页逻辑只此一处（GetVehicleDataTable），此方法只负责"空结果文案 + 呈现"。
         private (bool, string) ExecuteVehicleQuery(string whereClause, int page, out int totalPages)
         {
-            totalPages = page;
-            if (page < 1) page = 1;
-            const int pageSize = 12;
-            int offset = (page - 1) * pageSize;
-
-            string query = $@"
-                SELECT
-                    Id, Class, MatchType, Manufacturer, Model, Year, Drivetrain,
-                    Attribute, TireCompound, SurfaceCondition, Strength, Tune, Remarks, LapTime
-                FROM Vehicles
-                {whereClause}
-                ORDER BY Class, Manufacturer, Model
-                LIMIT {offset}, {pageSize}";
-
-            sql.ClearParametersAfterExecute = false;
-            sql.ExecuteDataSet(query);
-            sql.ClearParametersAfterExecute = true;
-            if (!sql.Success)
+            var (success, _, data, pages) = GetVehicleDataTable(whereClause, page);
+            totalPages = pages;
+            if (!success || data == null)
                 return (false, "查询失败，请稍后重试。");
 
-            DataTable dt = sql.DataSet.Tables[0];
-            if (dt.Rows.Count == 0)
+            if (data.Rows.Count == 0)
                 return (false, whereClause.Contains("LIKE") ? "未找到相关车辆。" : "未找到符合条件的车辆。");
 
             // 渲染为卡片/分行布局：每辆车一张卡片，只输出非空字段，移动端比 13 列宽表更易读
-            string body = RenderVehiclesAsCards(dt);
-
-            // 计算总页数
-            string countQuery = $"SELECT COUNT(*) FROM Vehicles {whereClause}";
-            DataRow? dr = sql.ExecuteDataRow(countQuery);
-            int totalCount = 0;
-            if (sql.Success && dr != null)
-                _ = int.TryParse(dr[0].ToString(), out totalCount);
-
-            if (totalCount > page * pageSize)
-                totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
-
-            return (true, body);
+            return (true, RenderVehiclesAsCards(data));
         }
 
         private void AddSetClause(List<string> clauses, string columnName, string? value)
