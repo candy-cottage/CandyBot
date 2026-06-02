@@ -21,6 +21,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- 让单元测试工程可访问 internal 成员（如 ForzaService.RenderVehiclesAsCards 纯渲染逻辑） -->
+    <InternalsVisibleTo Include="CandyBot.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Exclude test projects that live under tests/; they have their own .csproj -->
     <Compile Remove="tests\**" />
     <Content Remove="tests\**" />
