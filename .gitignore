@@ -364,3 +364,6 @@ FodyWeavers.xsd
 
 # SQLite DataBase
 *.db
+
+# macOS
+.DS_Store
