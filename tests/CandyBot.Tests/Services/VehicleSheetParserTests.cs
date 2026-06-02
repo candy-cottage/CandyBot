@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services;
 using FluentAssertions;
 using Xunit;
