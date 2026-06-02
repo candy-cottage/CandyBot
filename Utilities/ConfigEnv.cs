@@ -11,6 +11,7 @@ namespace CandyCottage.CandyBot.Utilities
     ///   <item><c>CANDYBOT_TENCENTDOCS_CLIENTID</c> / <c>CANDYBOT_TENCENTDOCS_ACCESSTOKEN</c> / <c>CANDYBOT_TENCENTDOCS_OPENID</c></item>
     ///   <item><c>CANDYBOT_SQL_MODE</c>(enum) / <c>CANDYBOT_SQL_DATASOURCE</c> / <c>CANDYBOT_SQL_PORT</c> / <c>CANDYBOT_SQL_DATABASE</c> / <c>CANDYBOT_SQL_USER</c> / <c>CANDYBOT_SQL_PASSWORD</c></item>
     ///   <item><c>CANDYBOT_APITOKENSALT</c></item>
+    ///   <item><c>CANDYBOT_DEEPSEEK_ENABLED</c>(bool) / <c>CANDYBOT_DEEPSEEK_APIKEY</c> / <c>CANDYBOT_DEEPSEEK_BASEURL</c> / <c>CANDYBOT_DEEPSEEK_MODEL</c></item>
     /// </list>
     /// </summary>
     public static class ConfigEnv
