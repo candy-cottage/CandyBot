@@ -102,8 +102,8 @@ internal static class PandaScoreMapper
 
     private static ExternalEsportsMatch MapMatch(PandaScoreMatch source)
     {
-        PandaScoreOpponent? team1 = source.Opponents.ElementAtOrDefault(0)?.Opponent;
-        PandaScoreOpponent? team2 = source.Opponents.ElementAtOrDefault(1)?.Opponent;
+        PandaScoreOpponent? team1 = (source.Opponents ?? []).ElementAtOrDefault(0)?.Opponent;
+        PandaScoreOpponent? team2 = (source.Opponents ?? []).ElementAtOrDefault(1)?.Opponent;
         DateTime start = source.ScheduledAt ?? source.BeginAt ?? DateTime.UtcNow;
         string league = source.League?.Name ?? "";
         string serie = source.Serie?.FullName ?? source.Serie?.Name ?? "";
@@ -114,6 +114,7 @@ internal static class PandaScoreMapper
             ExternalId: source.Id.ToString(),
             EventExternalId: $"{source.League?.Id}:{source.Serie?.Id}:{source.Tournament?.Id}",
             EventName: eventName,
+            // 赛事起止窗口由本地按开赛日合成（API 不提供赛事级时间区间）。
             EventStartTime: start.Date,
             EventEndTime: start.Date.AddDays(1),
             Team1Name: team1?.Name ?? "",
@@ -127,11 +128,11 @@ internal static class PandaScoreMapper
 
     private static ExternalEsportsResult MapResult(PandaScoreMatch source)
     {
-        long? team1Id = source.Opponents.ElementAtOrDefault(0)?.Opponent?.Id;
-        long? team2Id = source.Opponents.ElementAtOrDefault(1)?.Opponent?.Id;
+        long? team1Id = (source.Opponents ?? []).ElementAtOrDefault(0)?.Opponent?.Id;
+        long? team2Id = (source.Opponents ?? []).ElementAtOrDefault(1)?.Opponent?.Id;
         int winner = source.WinnerId == team1Id ? 1 : source.WinnerId == team2Id ? 2 : 0;
-        int score1 = source.Results.FirstOrDefault(r => r.TeamId == team1Id)?.Score ?? 0;
-        int score2 = source.Results.FirstOrDefault(r => r.TeamId == team2Id)?.Score ?? 0;
+        int score1 = (source.Results ?? []).FirstOrDefault(r => r.TeamId == team1Id)?.Score ?? 0;
+        int score2 = (source.Results ?? []).FirstOrDefault(r => r.TeamId == team2Id)?.Score ?? 0;
         return new(source.Id.ToString(), $"{score1}:{score2}", winner);
     }
 }
@@ -147,8 +148,8 @@ internal sealed record PandaScoreMatch(
     [property: JsonPropertyName("league")] PandaScoreNamedEntity? League,
     [property: JsonPropertyName("serie")] PandaScoreSerie? Serie,
     [property: JsonPropertyName("tournament")] PandaScoreNamedEntity? Tournament,
-    [property: JsonPropertyName("opponents")] List<PandaScoreOpponentSlot> Opponents,
-    [property: JsonPropertyName("results")] List<PandaScoreResult> Results);
+    [property: JsonPropertyName("opponents")] List<PandaScoreOpponentSlot>? Opponents,
+    [property: JsonPropertyName("results")] List<PandaScoreResult>? Results);
 
 internal sealed record PandaScoreNamedEntity(
     [property: JsonPropertyName("id")] long? Id,
