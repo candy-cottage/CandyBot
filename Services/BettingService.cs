@@ -658,6 +658,37 @@ namespace CandyCottage.CandyBot.Services
             return "数据库连接失败。";
         }
 
+        /// <summary>
+        /// 确认一场已被自动预填结果（pending_settlement=1）的比赛，复用 <see cref="SettleMatch"/> 完成派彩，
+        /// 成功后清除 pending 标记。本方法<b>不</b>重新实现派彩逻辑——所有发奖/置 status=2 仍由
+        /// <see cref="SettleMatch"/> 统一负责，这里只读取预填的 winner/result 并转译为其入参。
+        /// </summary>
+        public string ConfirmPendingSettlement(int matchId)
+        {
+            if (sql == null) return "数据库连接失败。";
+
+            sql.Parameters["@mid"] = matchId;
+            DataRow? row = sql.ExecuteDataRow("SELECT result, winner, pending_settlement FROM betting_matches WHERE id=@mid");
+            if (row is null) return "比赛不存在。";
+            if (Convert.ToInt32(row["pending_settlement"]) != 1) return "该比赛没有待确认结算结果。";
+
+            int winnerValue = row["winner"] != DBNull.Value ? Convert.ToInt32(row["winner"]) : 0;
+            string winner = winnerValue switch
+            {
+                1 => "team1",
+                2 => "team2",
+                _ => ""
+            };
+            string result = row["result"]?.ToString() ?? "";
+            string message = SettleMatch(matchId, winner, result);
+            if (message.Contains("结算完成", StringComparison.Ordinal))
+            {
+                sql.Parameters["@mid"] = matchId;
+                sql.Execute("UPDATE betting_matches SET pending_settlement=0 WHERE id=@mid");
+            }
+            return message;
+        }
+
         public (string, int) GetMyBets(long uid, long mid = -1, int page = 1, int pageSize = 10)
         {
             if (sql == null) return ("数据库连接失败。", 0);

@@ -365,6 +365,26 @@ public partial class CandyBotService
             return true;
         }
 
+        // 确认结算：管理员确认自动预填的比赛结果，复用结算派彩路径并清除待确认标记
+        if (e.Detail.StartsWith("确认结算"))
+        {
+            if (!await CheckUser(e, user, false)) return true;
+
+            string detail = e.Detail.Replace("确认结算", "").Trim();
+            if (!int.TryParse(detail, out int matchId))
+            {
+                await botService.SendAsync(e, "格式：确认结算 <比赛ID>");
+                return true;
+            }
+
+            md.Content = bettingService.ConfirmPendingSettlement(matchId);
+            reply.Keyboard = new KeyboardMessage().AppendButtons(2,
+                Button.CreateCmdButton("🔍 比赛详情", $"比赛详情 {matchId}"),
+                Button.CreateCmdButton("📅 比赛列表", "比赛列表"));
+            await botService.SendAsync(e, reply);
+            return true;
+        }
+
         // 管理员结算
         if (e.Detail.StartsWith("结算比赛"))
         {
