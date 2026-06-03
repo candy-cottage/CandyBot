@@ -50,6 +50,50 @@ public partial class CandyBotService
             return true;
         }
 
+        // 待发布：管理员查看草稿（未发布）比赛列表
+        if (e.Detail.StartsWith("待发布"))
+        {
+            if (!await CheckUser(e, user, false)) return true;
+
+            int page = 1;
+            string detail = e.Detail.Replace("待发布", "").Trim();
+            System.Text.RegularExpressions.Match match = GetFirstNumber().Match(detail);
+            if (match.Success && int.TryParse(match.Value, out int p)) page = p;
+
+            var (content, totalPages) = bettingService.GetPendingPublishMatches(page);
+            md.Content = content;
+            KeyboardMessage kb = new();
+            if (totalPages > 1) kb.AddPaginationRow("待发布 ", page, totalPages);
+            kb.AppendButtonsWithNewRow(2,
+                Button.CreateCmdButton("发布比赛", "发布比赛 ", enter: false),
+                Button.CreateCmdButton("立即同步", "立即同步"));
+            reply.Keyboard = kb;
+            await botService.SendAsync(e, reply);
+            return true;
+        }
+
+        // 发布比赛：管理员将草稿比赛连同父赛事一并发布
+        if (e.Detail.StartsWith("发布比赛"))
+        {
+            if (!await CheckUser(e, user, false)) return true;
+
+            string detail = e.Detail.Replace("发布比赛", "").Trim();
+            if (!int.TryParse(detail, out int matchId))
+            {
+                await botService.SendAsync(e, "格式：发布比赛 <比赛ID>");
+                return true;
+            }
+
+            md.Content = bettingService.PublishMatch(matchId, out string error)
+                ? $"比赛 {matchId} 已发布。"
+                : error;
+            reply.Keyboard = new KeyboardMessage().AppendButtons(2,
+                Button.CreateCmdButton("🔍 比赛详情", $"比赛详情 {matchId}"),
+                Button.CreateCmdButton("📋 待发布", "待发布"));
+            await botService.SendAsync(e, reply);
+            return true;
+        }
+
         // 赛程：显示所有比赛
         if (e.Detail.StartsWith("赛程") || e.Detail.StartsWith("比赛列表"))
         {

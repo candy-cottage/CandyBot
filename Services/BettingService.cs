@@ -191,6 +191,90 @@ namespace CandyCottage.CandyBot.Services
             return (sb.ToString().TrimEnd(), totalPages);
         }
 
+        /// <summary>
+        /// 列出所有未发布（草稿）比赛，供管理员发布前预览。与用户可见列表不同，这里只过滤
+        /// <c>is_published = 0</c>，不要求父赛事已发布——草稿比赛的父赛事通常也是草稿。
+        /// </summary>
+        public (string, int) GetPendingPublishMatches(int page, int pageSize = 10)
+        {
+            if (sql == null) return ("数据库连接失败。", 0);
+
+            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_matches WHERE is_published = 0");
+            int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
+            int totalPages = (int)Math.Ceiling(total / (double)pageSize);
+            if (page > totalPages) page = totalPages;
+            if (page < 1) page = 1;
+            if (total == 0) return ("暂无待发布比赛。", 1);
+
+            int offset = (page - 1) * pageSize;
+            sql.ExecuteDataSet($@"
+                SELECT m.id, m.team1_name, m.team2_name, m.stage, m.start_time, e.name AS event_name
+                FROM betting_matches m
+                JOIN betting_events e ON e.id = m.event_id
+                WHERE m.is_published = 0
+                ORDER BY m.start_time ASC
+                LIMIT {pageSize} OFFSET {offset}");
+
+            StringBuilder sb = new();
+            sb.AppendLine($"待发布比赛{(totalPages > 1 ? $"（第 {page}/{totalPages} 页）" : "")}");
+            foreach (DataRow row in sql.DataSet.Tables[0].Rows)
+            {
+                long id = Convert.ToInt64(row["id"]);
+                sb.AppendLine($"[{id}] {row["event_name"]} {row["stage"]} {row["team1_name"]} vs {row["team2_name"]} | {Convert.ToDateTime(row["start_time"]):yyyy-MM-dd HH:mm}");
+            }
+            return (sb.ToString().TrimEnd(), totalPages);
+        }
+
+        /// <summary>
+        /// 发布一场草稿比赛：在同一事务内将该比赛连同其父赛事一并标记为已发布
+        /// （<c>is_published = 1</c>）。重复发布是幂等的（再次置 1 无副作用）。
+        /// </summary>
+        public bool PublishMatch(int matchId, out string error)
+        {
+            error = "";
+            if (sql == null)
+            {
+                error = "数据库连接失败。";
+                return false;
+            }
+
+            try
+            {
+                sql.NewTransaction();
+                sql.Parameters["@mid"] = matchId;
+                sql.ExecuteDataSetForUpdate("SELECT id, event_id, is_published FROM betting_matches WHERE id=@mid");
+                if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
+                {
+                    error = "比赛不存在。";
+                    return false;
+                }
+
+                DataRow row = sql.DataSet.Tables[0].Rows[0];
+                long eventId = Convert.ToInt64(row["event_id"]);
+                sql.Parameters["@eid"] = eventId;
+                sql.Execute("UPDATE betting_events SET is_published=1 WHERE id=@eid");
+                sql.Parameters["@mid"] = matchId;
+                sql.Execute("UPDATE betting_matches SET is_published=1 WHERE id=@mid");
+                if (!sql.Success)
+                {
+                    error = "发布比赛失败。";
+                    return false;
+                }
+
+                sql.Commit();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"发布比赛失败，原因：{ex.Message}";
+                return false;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
         public string GetMatchDetail(long matchId, out KeyboardMessage kb)
         {
             kb = new KeyboardMessage();
