@@ -43,6 +43,7 @@ builder.Services.AddSingleton<SQLConnectionConfig>();
 builder.Services.AddSingleton<CandyBotFunctionConfig>();
 builder.Services.AddSingleton<TencentDocsConfig>();
 builder.Services.AddSingleton<DeepSeekConfig>();
+builder.Services.AddSingleton<ForzaConfig>();
 builder.Services.AddSingleton<PandaScoreConfig>();
 builder.Services.AddSingleton<CharacterModule>();
 builder.Services.AddSingleton<ItemModule>();
