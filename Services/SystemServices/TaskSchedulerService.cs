@@ -20,7 +20,7 @@ namespace CandyCottage.CandyBot.Services.SystemServices
                         DateTime now = DateTime.Now;
                         List<IScheduledTask>? tasksToRun = [.. manager.GetAllTasks().Where(t => !manager.IsPaused(t.Name) && t.NextRun <= now)];
 
-                        foreach (var task in tasksToRun)
+                        foreach (IScheduledTask task in tasksToRun)
                         {
                             // 防止同一任务并发执行（任务内部可能耗时超过1秒）
                             if (IsTaskRunning(task.Name)) continue;

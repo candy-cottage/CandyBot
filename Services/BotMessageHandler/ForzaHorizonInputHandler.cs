@@ -34,15 +34,29 @@ public partial class CandyBotService
 
             if (e.Detail.StartsWith("同步车辆表"))
             {
-                if (!await CheckUser(e, user, false))
+                if (!await CheckUser(e, user))
                 {
                     return true;
                 }
 
-                ForzaSheetSyncReport report = await forzaSheetImporter.SyncAsync(ForzaSheetImporter.DefaultVehicleSheetFileId);
+                string fileId = e.Detail["同步车辆表".Length..].Trim();
+                if (fileId == "" && forzaConfig.DocsID.TryGetValue("ZGC", out string? value) && value != null)
+                {
+                    fileId = value;
+                }
+
+                if (fileId == "")
+                {
+                    md.Content = "请提供要同步的表格ID，例如：\n同步车辆表 <表格ID>\n如果不提供ID，将默认使用配置中的ZGC车队表格。若仍然显示该提示，请检查配置文件。";
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                ForzaSheetSyncReport report = await forzaSheetImporter.SyncAsync(fileId);
                 if (report.Success)
                 {
                     md.Content =
+                        $"**文件：{fileId}**\r\n" +
                         $"✅ 已同步 {report.InsertedVehicleCount} 辆车辆。\r\n" +
                         $"原表：{report.PreviousVehicleCount} 辆；解析：{report.ParsedVehicleCount} 辆；工作表：{report.ParsedSheetNames.Count} 张。\r\n" +
                         $"跳过工作表：{report.SkippedSheetNames.Count} 张；跳过行：{report.SkippedRows.Count} 行。" +
@@ -51,6 +65,7 @@ public partial class CandyBotService
                 else
                 {
                     md.Content =
+                        $"**文件：{fileId}**\r\n" +
                         $"❌ 同步车辆表失败：{report.ErrorMessage}\r\n" +
                         $"旧数据已保留。当前原表记录：{report.PreviousVehicleCount} 辆；解析：{report.ParsedVehicleCount} 辆。";
                 }
@@ -59,8 +74,7 @@ public partial class CandyBotService
                 return true;
             }
 
-            // 占位：查赛道尚未实现。必须在此截断（return true），否则指令会穿透到
-            // HandleToggleCommand 的权限闸，给用户回出"无权限/创建存档"等牛头不对马嘴的提示。
+            // 占位：查赛道尚未实现
             if (e.Detail.StartsWith("查赛道"))
             {
                 md.Content = "🛣️ 赛道查询功能正在开发中，敬请期待～";

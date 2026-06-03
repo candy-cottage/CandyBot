@@ -60,6 +60,8 @@ public class CandyBotServiceTests
         Betting_ReadOnly = false,
     };
 
+    public const string DefaultVehicleSheetFileId = "DSXRieHNsZXpFZmZ4";
+
     // ---- WillGoOn (plan step 1) ----------------------------------------
 
     [Fact]
@@ -284,7 +286,7 @@ public class CandyBotServiceTests
     {
         RecordingBotReplySender sender = new();
         IForzaSheetImporter importer = Substitute.For<IForzaSheetImporter>();
-        importer.SyncAsync(ForzaSheetImporter.DefaultVehicleSheetFileId, Arg.Any<CancellationToken>())
+        importer.SyncAsync(DefaultVehicleSheetFileId, Arg.Any<CancellationToken>())
             .Returns(new ForzaSheetSyncReport(
                 Success: true,
                 PreviousVehicleCount: 128,
@@ -302,7 +304,7 @@ public class CandyBotServiceTests
         bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
 
         handled.Should().BeTrue();
-        await importer.Received(1).SyncAsync(ForzaSheetImporter.DefaultVehicleSheetFileId, Arg.Any<CancellationToken>());
+        await importer.Received(1).SyncAsync(DefaultVehicleSheetFileId, Arg.Any<CancellationToken>());
         sender.TextContents.Single().Should().Contain("已同步 157 辆");
     }
 }
