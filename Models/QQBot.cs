@@ -41,7 +41,7 @@ namespace CandyCottage.CandyBot.Models
     public class Author
     {
         [JsonPropertyName("bot")]
-        public bool Bot { get; set; }
+        public bool Bot { get; set; } = false;
 
         [JsonPropertyName("id")]
         public string Id { get; set; } = "";
@@ -209,6 +209,15 @@ namespace CandyCottage.CandyBot.Models
         /// </summary>
         [JsonIgnore]
         public bool IsSuccess => string.IsNullOrEmpty(Error);
+    }
+
+    public class SendMessageResult
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = "";
+
+        [JsonPropertyName("timestamp")]
+        public string Timestamp { get; set; } = "";
     }
 
     public class AccessTokenResponse

@@ -25,10 +25,15 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
         public List<BotReply> Sent { get; } = [];
         public IEnumerable<string?> TextContents => Sent.Select(reply => reply.Text ?? reply.Markdown?.Content);
 
-        public Task SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)
+        public Task<SendMessageResult?> SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)
         {
             Sent.Add(reply);
-            return Task.CompletedTask;
+            return Task.FromResult((SendMessageResult?)null);
+        }
+
+        public Task<bool> RecallMessageAsync(IBotMessage msg, bool hideTip = false)
+        {
+            return Task.FromResult(false);
         }
     }
 
@@ -74,7 +79,10 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
             new MemoryCache(new MemoryCacheOptions()),
             sql,
             cfg,
+            forzaConfig: null!,
+            candyBotConfig: null!,
             taskQueue: null!,
+            taskManager: null!,
             sender,
             new BettingService(sql, cfg),
             sqlInitService: null!,

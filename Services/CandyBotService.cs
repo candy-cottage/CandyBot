@@ -11,9 +11,10 @@ using ProjectRedbud.FunGame.SQLQueryExtension;
 
 namespace CandyCottage.CandyBot.Services
 {
-    public partial class CandyBotService(ILogger<CandyBotService> logger, IMemoryCache memoryCache, SQLHelper sql, CandyBotFunctionConfig functionConfig, IBackgroundTaskQueue taskQueue,
-        IBotReplySender botService, BettingService bettingService, SQLTableInitializeService sqlInitService, UserService userService, ForzaService forzaService, IForzaSheetImporter forzaSheetImporter,
-        Esports.EsportsSyncService esportsSyncService)
+    public partial class CandyBotService(ILogger<CandyBotService> logger, IMemoryCache memoryCache, SQLHelper sql, CandyBotFunctionConfig functionConfig, ForzaConfig forzaConfig,
+        CandyBotConfig candyBotConfig, IBackgroundTaskQueue taskQueue, ITaskSchedulerManager taskManager,
+        IBotReplySender botService, BettingService bettingService, SQLTableInitializeService sqlInitService, UserService userService, ForzaService forzaService,
+        IForzaSheetImporter forzaSheetImporter, Esports.EsportsSyncService esportsSyncService)
     {
         public async Task Handler(IBotMessage e)
         {
@@ -230,5 +231,7 @@ namespace CandyCottage.CandyBot.Services
         private static partial System.Text.RegularExpressions.Regex GetFirstNumber();
         [System.Text.RegularExpressions.GeneratedRegex(@"(\w+)=(?:""([^""]*)""|(\S+))")]
         private static partial System.Text.RegularExpressions.Regex GetParamValue();
+        [System.Text.RegularExpressions.GeneratedRegex(@"^([A-Za-z]\d*)(.*)$")]
+        private static partial System.Text.RegularExpressions.Regex MatchClassAndMatchType();
     }
 }

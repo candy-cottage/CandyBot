@@ -12,8 +12,6 @@ public sealed class ForzaSheetImporter(
     ForzaService forzaService,
     ISheetParseDiagnostic diagnostic) : IForzaSheetImporter
 {
-    public const string DefaultVehicleSheetFileId = "DSXRieHNsZXpFZmZ4";
-
     public async Task<ForzaSheetSyncReport> SyncAsync(string fileId, CancellationToken cancellationToken = default)
     {
         Dictionary<string, List<List<string>>> sheets = await sheetService.GetSheetDataAsync(fileId);
@@ -122,7 +120,7 @@ public sealed class ForzaSheetImporter(
     {
         try
         {
-            IReadOnlyList<IReadOnlyList<string>> sample = grid.Take(10).ToArray();
+            IReadOnlyList<IReadOnlyList<string>> sample = [.. grid.Take(10)];
             return await diagnostic.DiagnoseAsync(sheetName, sample, cancellationToken);
         }
         catch (Exception ex)

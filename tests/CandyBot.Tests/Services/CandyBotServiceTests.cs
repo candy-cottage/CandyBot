@@ -7,7 +7,6 @@ using FluentAssertions;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Milimoe.FunGame.Core.Api.Transmittal;
-using Milimoe.FunGame.Core.Entity;
 using NSubstitute;
 using Xunit;
 
@@ -26,8 +25,9 @@ public class CandyBotServiceTests
     private static CandyBotService CreateService(
         IBotReplySender botService,
         CandyBotFunctionConfig? functionConfig = null,
+        ForzaConfig? forzaConfig = null,
         IMemoryCache? memoryCache = null,
-        Milimoe.FunGame.Core.Api.Transmittal.SQLHelper sql = null!,
+        SQLHelper sql = null!,
         BettingService bettingService = null!,
         IForzaSheetImporter forzaSheetImporter = null!) =>
         new(
@@ -35,7 +35,10 @@ public class CandyBotServiceTests
             memoryCache!,
             sql,
             functionConfig!,
+            forzaConfig!,
+            candyBotConfig: null!,
             taskQueue: null!,
+            taskManager: null!,
             botService,
             bettingService,
             sqlInitService: null!,
@@ -57,6 +60,16 @@ public class CandyBotServiceTests
         Betting = true,
         Betting_ReadOnly = false,
     };
+
+    private static ForzaConfig ForzaSheets() => new()
+    {
+        DocsID =
+        {
+            { "ZGC", DefaultVehicleSheetFileId }
+        }
+    };
+
+    public const string DefaultVehicleSheetFileId = "DSXRieHNsZXpFZmZ4";
 
     // ---- WillGoOn (plan step 1) ----------------------------------------
 
@@ -189,7 +202,7 @@ public class CandyBotServiceTests
         const string openid = "admin-openid";
         cache.Set($"bot::{openid}", TestData.CreateUser(isAdmin: true, openid: openid), TimeSpan.FromMinutes(10));
 
-        CandyBotService svc = CreateService(sender, AllOn(), cache);
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(), cache);
         C2CMessage e = TestData.CreateMessage("这是一条没有任何处理器匹配的未知指令", openid);
 
         await svc.Handler(e);
@@ -211,7 +224,7 @@ public class CandyBotServiceTests
         cfg.System = false;
         cfg.AllowAdminsDebug = false;
 
-        CandyBotService svc = CreateService(sender, cfg, cache);
+        CandyBotService svc = CreateService(sender, cfg, ForzaSheets(), cache);
         C2CMessage e = TestData.CreateMessage("随便一条非开关指令", openid);
 
         await svc.Handler(e);
@@ -232,7 +245,7 @@ public class CandyBotServiceTests
         cfg.System = false;
         cfg.AllowAdminsDebug = true;
 
-        CandyBotService svc = CreateService(sender, cfg, cache);
+        CandyBotService svc = CreateService(sender, cfg, ForzaSheets(), cache);
         C2CMessage e = TestData.CreateMessage("帮助", openid);
 
         await svc.Handler(e);
@@ -263,7 +276,7 @@ public class CandyBotServiceTests
 
         CandyBotFunctionConfig cfg = AllOn();
         BettingService betting = new(sqlSub, cfg);
-        CandyBotService svc = CreateService(sender, cfg, cache, bettingService: betting);
+        CandyBotService svc = CreateService(sender, cfg, ForzaSheets(), cache, bettingService: betting);
 
         C2CMessage e = TestData.CreateMessage("赛事详情 1", openid);
         await svc.Handler(e);
@@ -282,7 +295,7 @@ public class CandyBotServiceTests
     {
         RecordingBotReplySender sender = new();
         IForzaSheetImporter importer = Substitute.For<IForzaSheetImporter>();
-        importer.SyncAsync(ForzaSheetImporter.DefaultVehicleSheetFileId, Arg.Any<CancellationToken>())
+        importer.SyncAsync(DefaultVehicleSheetFileId, Arg.Any<CancellationToken>())
             .Returns(new ForzaSheetSyncReport(
                 Success: true,
                 PreviousVehicleCount: 128,
@@ -294,13 +307,17 @@ public class CandyBotServiceTests
                 Diagnostics: [],
                 ErrorMessage: null));
 
-        CandyBotService svc = CreateService(sender, AllOn(), forzaSheetImporter: importer);
+        SQLHelper sqlSub = Substitute.For<SQLHelper>();
+        sqlSub.Parameters.Returns(new Dictionary<string, object>());
+        sqlSub.Execute(Arg.Any<string>()).Returns(0);
+        sqlSub.Result.Returns(Milimoe.FunGame.Core.Library.Constant.SQLResult.NotFound);
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(), sql: sqlSub, forzaSheetImporter: importer);
         C2CMessage e = TestData.CreateMessage("同步车辆表");
 
         bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
 
         handled.Should().BeTrue();
-        await importer.Received(1).SyncAsync(ForzaSheetImporter.DefaultVehicleSheetFileId, Arg.Any<CancellationToken>());
+        await importer.Received(1).SyncAsync(DefaultVehicleSheetFileId, Arg.Any<CancellationToken>());
         sender.TextContents.Single().Should().Contain("已同步 157 辆");
     }
 }
