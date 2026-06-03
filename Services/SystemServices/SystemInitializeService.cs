@@ -4,7 +4,7 @@ using Milimoe.FunGame.Core.Library.Constant;
 
 namespace CandyCottage.CandyBot.Services.SystemServices
 {
-    public class SystemInitializeService(ILogger<SystemInitializeService> logger, CandyBotConfig candybotConfig, SQLConnectionConfig sqlConfig, BotConfig botConfig, CandyBotFunctionConfig functionConfig, TencentDocsConfig tencentDocsConfig, DeepSeekConfig deepSeekConfig, PandaScoreConfig pandaScoreConfig, CharacterModule characterModule, ItemModule itemModule, SkillModule skillModule) : IHostedService
+    public class SystemInitializeService(ILogger<SystemInitializeService> logger, IServiceScopeFactory scopeFactory, CandyBotConfig candybotConfig, SQLConnectionConfig sqlConfig, BotConfig botConfig, CandyBotFunctionConfig functionConfig, TencentDocsConfig tencentDocsConfig, DeepSeekConfig deepSeekConfig, PandaScoreConfig pandaScoreConfig, CharacterModule characterModule, ItemModule itemModule, SkillModule skillModule) : IHostedService
     {
         public Task StartAsync(CancellationToken cancellationToken)
         {
@@ -17,6 +17,12 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             tencentDocsConfig.Init();
             deepSeekConfig.Init();
             pandaScoreConfig.Init();
+            logger.LogInformation("检查数据库结构升级 . . .");
+            using (IServiceScope scope = scopeFactory.CreateScope())
+            {
+                SQLTableInitializeService sqlInitService = scope.ServiceProvider.GetRequiredService<SQLTableInitializeService>();
+                sqlInitService.EnsureBettingAutomationSchema();
+            }
             logger.LogInformation("加载 FunGame 模组 . . .");
             characterModule.Load();
             itemModule.Load();

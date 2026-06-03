@@ -67,12 +67,13 @@ public partial class CandyBotService
                 md.Content = $"同步完成：抓取 {schedules.Fetched} 场，新增草稿 {schedules.MatchesCreated} 场，更新 {schedules.MatchesUpdated} 场；结果检查 {results.Checked} 场，待确认 {results.PendingSettlementCreated} 场。";
                 reply.Keyboard = new KeyboardMessage().AppendButtons(2,
                     Button.CreateCmdButton("📋 待发布列表", "待发布比赛"),
+                    Button.CreateCmdButton("✅ 待确认结算", "待确认结算"),
                     Button.CreateCmdButton("📅 比赛列表", "比赛列表"));
             }
             catch (Exception ex)
             {
                 // 数据源异常（网络 / 5xx / JSON 解析等）不得静默——保证管理员总能收到反馈。
-                if (logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Error)) logger.LogError(ex, "立即同步失败");
+                if (logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Error)) logger.LogError(ex, "立即同步赛事失败");
                 md.Content = $"赛事同步失败：{ex.Message}";
             }
             await botService.SendAsync(e, reply);
@@ -95,7 +96,30 @@ public partial class CandyBotService
             if (totalPages > 1) kb.AddPaginationRow("待发布比赛 ", page, totalPages);
             kb.AppendButtonsWithNewRow(2,
                 Button.CreateCmdButton("发布比赛", "发布比赛 ", enter: false),
-                Button.CreateCmdButton("立即同步", "立即同步赛事"));
+                Button.CreateCmdButton("立即同步赛事", "立即同步赛事"),
+                Button.CreateCmdButton("待确认结算", "待确认结算"));
+            reply.Keyboard = kb;
+            await botService.SendAsync(e, reply);
+            return true;
+        }
+
+        // 待确认结算：管理员查看自动预填结果、等待二次确认的比赛列表
+        if (e.Detail.StartsWith("待确认结算"))
+        {
+            if (!await CheckUser(e, user, false)) return true;
+
+            int page = 1;
+            string detail = e.Detail.Replace("待确认结算", "").Trim();
+            System.Text.RegularExpressions.Match match = GetFirstNumber().Match(detail);
+            if (match.Success && int.TryParse(match.Value, out int p)) page = p;
+
+            var (content, totalPages) = bettingService.GetPendingSettlementMatches(page);
+            md.Content = content;
+            KeyboardMessage kb = new();
+            if (totalPages > 1) kb.AddPaginationRow("待确认结算 ", page, totalPages);
+            kb.AppendButtonsWithNewRow(2,
+                Button.CreateCmdButton("确认结算", "确认结算 ", enter: false),
+                Button.CreateCmdButton("立即同步赛事", "立即同步赛事"));
             reply.Keyboard = kb;
             await botService.SendAsync(e, reply);
             return true;

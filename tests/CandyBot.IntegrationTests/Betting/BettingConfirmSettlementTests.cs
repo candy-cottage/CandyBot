@@ -73,6 +73,31 @@ public class BettingConfirmSettlementTests(MySqlFixture fixture)
         Convert.ToInt32(row["pending_settlement"]).Should().Be(0);
     }
 
+    [Fact]
+    public async Task GetPendingSettlementMatches_列出待确认自动结果()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+        BettingService service = new(sql, new CandyBotFunctionConfig());
+        long matchId = SeedMatch(service);
+        sql.Parameters["@mid"] = matchId;
+        sql.Execute("UPDATE betting_matches SET result='2:1', winner=1, pending_settlement=1, betting_enabled=0 WHERE id=@mid");
+        sql.Execute("INSERT INTO betting_events (name, status, start_time, end_time, is_published) VALUES ('隐藏赛事', 0, NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY), 0)");
+        long hiddenEventId = sql.LastInsertId;
+        sql.Parameters["@eid"] = hiddenEventId;
+        sql.Execute(@"INSERT INTO betting_matches (event_id, team1_name, team2_name, stage, status, start_time, bet_deadline, result, winner, available_options, team1_win_odds, team2_win_odds, betting_enabled, is_published, pending_settlement)
+            VALUES (@eid, '隐藏A', '隐藏B', '小组赛', 0, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 3 HOUR), '1:0', 1, '[""team1_win"",""team2_win""]', 2, 2, 0, 1, 1)");
+
+        var (content, totalPages) = service.GetPendingSettlementMatches(1, pageSize: 1);
+
+        totalPages.Should().Be(1);
+        content.Should().Contain("待确认结算比赛");
+        content.Should().Contain("NAVI vs FaZe");
+        content.Should().Contain("2:1");
+        content.Should().Contain(matchId.ToString());
+        content.Should().NotContain("隐藏A");
+    }
+
     /// <summary>
     /// 没有待确认结果（pending_settlement 默认 0）时，确认应短路返回提示，<b>不触发任何结算</b>：
     /// 比赛 status 仍为 0、pending 仍为 0。

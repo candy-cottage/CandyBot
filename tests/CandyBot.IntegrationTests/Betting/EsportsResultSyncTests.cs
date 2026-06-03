@@ -111,4 +111,32 @@ public class EsportsResultSyncTests(MySqlFixture fixture)
         Convert.ToInt32(row["winner"]).Should().Be(1);
         Convert.ToInt32(row["pending_settlement"]).Should().Be(1);
     }
+
+    [Fact]
+    public async Task SyncResultsAsync_已取消比赛不预填结果()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+        BettingService betting = new(sql, new CandyBotFunctionConfig());
+        betting.CreateEvent("测试赛事", DateTime.Now.AddDays(-1), DateTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
+        sql.Parameters["@eid"] = eventId!.Value;
+        sql.Execute(@"INSERT INTO betting_matches (external_id, is_published, pending_settlement, event_id, team1_name, team2_name, stage, status, start_time, bet_deadline, available_options, team1_win_odds, team2_win_odds, description, betting_enabled)
+            VALUES ('match-canceled', 1, 0, @eid, 'NAVI', 'FaZe', '小组赛', 3, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 3 HOUR), '[""team1_win"",""team2_win""]', 1.85, 1.85, '', 0)");
+        long matchId = sql.LastInsertId;
+
+        EsportsSyncService service = new(NullLogger<EsportsSyncService>.Instance, sql, betting,
+            new FakeProvider([new ExternalEsportsResult("match-canceled", "2:1", 1)]),
+            new PandaScoreConfig { GameSlug = "csgo" });
+
+        EsportsResultSyncReport report = await service.SyncResultsAsync();
+
+        report.Checked.Should().Be(0, "取消的比赛不应进入结果同步候选集");
+        report.PendingSettlementCreated.Should().Be(0);
+        sql.Parameters["@mid"] = matchId;
+        DataRow? row = sql.ExecuteDataRow("SELECT result, winner, pending_settlement, status FROM betting_matches WHERE id=@mid");
+        row!["result"].Should().Be(DBNull.Value);
+        row["winner"].Should().Be(DBNull.Value);
+        Convert.ToInt32(row["pending_settlement"]).Should().Be(0);
+        Convert.ToInt32(row["status"]).Should().Be(3);
+    }
 }

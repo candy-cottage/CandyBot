@@ -93,7 +93,8 @@ EsportsSyncService (scoped, 核心方法, 可单测/可指令触发)
 
 ### 3.4 结果预填 + 确认结算（`EsportsSyncService.SyncResultsAsync` + 指令）
 
-- `SyncResultsAsync`：筛 `external_id` 非空、`status ≠ 2`、`pending_settlement = 0`、`is_published = 1` 的已结束比赛，向 provider 拉结果；命中则写 `result`/`winner`、置 `pending_settlement = 1`，经**后台任务队列** `SendUserNotice` 通知管理员：「比赛X 结果就绪：NAVI 2:1 FaZe，确认结算 X」（带 `确认结算 X` 按钮）。
+- `SyncResultsAsync`：筛 `external_id` 非空、`status IN (0,1)`、`pending_settlement = 0`、`is_published = 1` 的未结算且未取消比赛，向 provider 拉结果；命中则写 `result`/`winner`、置 `pending_settlement = 1` 并关闭 `betting_enabled`，管理员通过同步回复或 `待确认结算` 列表处理。
+- `待确认结算` —— 列出 `pending_settlement = 1` 的已发布比赛，便于管理员发现和处理自动预填结果。
 - `确认结算 <id>` —— 读暂存的 winner/result，把 `winner`(1/2) 映射成 `SettleMatch` 期望的 `"team1"/"team2"` 字符串，调**现有 `SettleMatch(matchId, winner, result)`**（status→2 + 事务化派彩），成功后清 `pending_settlement = 0`。**派彩逻辑零改动**。
 - **仅 `team1_win/team2_win` 自动预填**。含 `score`/`mvp` 选项的比赛：不预填，通知里标「需人工结算」，保持现有人工 `结算比赛` 路径。标 `TODO(debt)`。
 - 可选 `忽略结算 <id>` —— 管理员判定自动拉到的结果有误时清 `pending_settlement` 并转纯人工（本期可作为增强，先留接口）。

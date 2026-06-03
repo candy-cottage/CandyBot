@@ -178,7 +178,7 @@ QQBotWebSocketService (BackgroundService)
 - `我的预测 [比赛ID] [页码]` —— 查看预测记录
 - `预测领奖` —— 领取已结算预测的奖励
 - `预测帮助` / `赛事帮助` —— 赛事帮助菜单
-- 赛事自动化（管理员，受 `赛事自动化` 开关控制）：`立即同步赛事`（手动触发一次赛程抓取 + 结果预填）、`待发布比赛`（查看未发布草稿比赛）、`发布比赛 <ID>`（把草稿发布为对用户可见）、`确认结算 <ID>`（对已预填结果的比赛二次确认结算）
+- 赛事自动化（管理员，受 `赛事自动化` 开关控制）：`立即同步赛事`（手动触发一次赛程抓取 + 结果预填）、`待发布比赛`（查看未发布草稿比赛）、`待确认结算`（查看自动预填结果）、`发布比赛 <ID>`（把草稿发布为对用户可见）、`确认结算 <ID>`（对已预填结果的比赛二次确认结算）
 - HTTP API：`BettingController` 提供 `/betting/events`、`/betting/matches` GET（匿名，仅返回 `is_published=1` 的已发布赛事/比赛）
 - 管理指令（通过 `BettingService`）：创建赛事、创建比赛、修改比赛、结算比赛、退赛、取消比赛等
 - 自动化模块在 `Services/Esports/`：`IEsportsDataProvider` / `PandaScoreProvider`（外部数据源）、`EsportsSyncService`（幂等地把赛程入未发布草稿、把已终结结果预填为待确认）、`EsportsSyncHostedService`（定时调度），配置见 `PandaScoreConfig`。同步落库的赛事/比赛统一为草稿（`is_published=0`），结果预填为 `pending_settlement=1`，须经管理员 `发布比赛` / `确认结算` 才生效

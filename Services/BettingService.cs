@@ -226,6 +226,50 @@ namespace CandyCottage.CandyBot.Services
         }
 
         /// <summary>
+        /// 列出外部数据源已预填结果、等待管理员二次确认结算的比赛。
+        /// </summary>
+        public (string, int) GetPendingSettlementMatches(int page, int pageSize = 10)
+        {
+            if (sql == null) return ("数据库连接失败。", 0);
+
+            sql.ExecuteDataSet(@"SELECT COUNT(*)
+                FROM betting_matches m
+                JOIN betting_events e ON e.id = m.event_id
+                WHERE m.pending_settlement = 1
+                  AND m.is_published = 1
+                  AND e.is_published = 1
+                  AND m.status IN (0, 1)");
+            int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
+            int totalPages = (int)Math.Ceiling(total / (double)pageSize);
+            if (page > totalPages) page = totalPages;
+            if (page < 1) page = 1;
+            if (total == 0) return ("暂无待确认结算比赛。", 1);
+
+            int offset = (page - 1) * pageSize;
+            sql.ExecuteDataSet($@"
+                SELECT m.id, m.team1_name, m.team2_name, m.stage, m.start_time, m.result, e.name AS event_name
+                FROM betting_matches m
+                JOIN betting_events e ON e.id = m.event_id
+                WHERE m.pending_settlement = 1
+                  AND m.is_published = 1
+                  AND e.is_published = 1
+                  AND m.status IN (0, 1)
+                ORDER BY m.start_time DESC
+                LIMIT {pageSize} OFFSET {offset}");
+
+            StringBuilder sb = new();
+            sb.AppendLine($"待确认结算比赛{(totalPages > 1 ? $"（第 {page}/{totalPages} 页）" : "")}");
+            foreach (DataRow row in sql.DataSet.Tables[0].Rows)
+            {
+                long id = Convert.ToInt64(row["id"]);
+                string stage = row["stage"]?.ToString() ?? "";
+                string result = row["result"]?.ToString() ?? "";
+                sb.AppendLine($"[{id}] {row["event_name"]} {stage} {row["team1_name"]} vs {row["team2_name"]} | 结果：{result} | 确认结算 {id}");
+            }
+            return (sb.ToString().TrimEnd(), totalPages);
+        }
+
+        /// <summary>
         /// 发布一场草稿比赛：在同一事务内将该比赛连同其父赛事一并标记为已发布
         /// （<c>is_published = 1</c>）。重复发布是幂等的（再次置 1 无副作用）。
         /// </summary>
@@ -460,6 +504,13 @@ namespace CandyCottage.CandyBot.Services
                 decimal team1Odds = Convert.ToDecimal(row["team1_win_odds"]);
                 decimal team2Odds = Convert.ToDecimal(row["team2_win_odds"]);
                 bool bettingEnabled = Convert.ToBoolean(row["betting_enabled"]);
+                bool pendingSettlement = Convert.ToBoolean(row["pending_settlement"]);
+                bool hasPrefilledWinner = row["winner"] != DBNull.Value;
+                if (pendingSettlement || (hasPrefilledWinner && status != 2))
+                {
+                    error = "该比赛处于待确认结算阶段。";
+                    return false;
+                }
                 if (!bettingEnabled)
                 {
                     error = "该比赛不开放预测。";

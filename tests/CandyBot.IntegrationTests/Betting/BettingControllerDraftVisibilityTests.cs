@@ -110,4 +110,20 @@ public sealed class BettingControllerDraftVisibilityTests : IAsyncLifetime
         HttpResponseMessage draft = await client.GetAsync($"/betting/matches/{_draftMatchId}");
         draft.StatusCode.Should().Be(HttpStatusCode.NotFound, "未发布草稿比赛（含预填 result/winner）对匿名用户应不存在");
     }
+
+    [Fact]
+    public async Task GetMatch_待确认结算结果_匿名响应不泄露winner和result()
+    {
+        using MySQLHelper sql = _fixture.CreateHelper();
+        sql.Parameters["@mid"] = _publishedMatchId;
+        sql.Execute("UPDATE betting_matches SET result='2:0', winner=1, pending_settlement=1 WHERE id=@mid");
+        HttpClient client = _factory.CreateClient();
+
+        HttpResponseMessage resp = await client.GetAsync($"/betting/matches/{_publishedMatchId}");
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        string body = await resp.Content.ReadAsStringAsync();
+        body.Should().NotContain("2:0");
+        body.Should().NotContain("\"winner\":1");
+    }
 }

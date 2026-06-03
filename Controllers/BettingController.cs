@@ -210,6 +210,8 @@ namespace CandyCottage.CandyBot.Controllers
             return new BettingEvent
             {
                 Id = Convert.ToInt32(row["id"]),
+                ExternalId = row["external_id"] != DBNull.Value ? row["external_id"].ToString() : null,
+                IsPublished = Convert.ToInt32(row["is_published"]) == 1,
                 Name = row["name"].ToString() ?? "",
                 Status = Convert.ToInt32(row["status"]),
                 StartTime = Convert.ToDateTime(row["start_time"]),
@@ -221,20 +223,29 @@ namespace CandyCottage.CandyBot.Controllers
 
         private static BettingMatch MapMatch(DataRow row)
         {
+            int status = Convert.ToInt32(row["status"]);
+            bool pendingSettlement = Convert.ToInt32(row["pending_settlement"]) == 1;
+            bool exposeResult = status == 2 && !pendingSettlement;
+            string? result = row["result"] != DBNull.Value ? row["result"].ToString() : null;
+            int? winner = row["winner"] != DBNull.Value ? Convert.ToInt32(row["winner"]) : null;
+
             return new BettingMatch
             {
                 Id = Convert.ToInt32(row["id"]),
+                ExternalId = row["external_id"] != DBNull.Value ? row["external_id"].ToString() : null,
+                IsPublished = Convert.ToInt32(row["is_published"]) == 1,
+                PendingSettlement = pendingSettlement,
                 EventId = Convert.ToInt32(row["event_id"]),
                 Stage = row["stage"]?.ToString(),
                 Team1Name = row["team1_name"].ToString() ?? "",
                 Team1Logo = row["team1_logo"]?.ToString(),
                 Team2Name = row["team2_name"].ToString() ?? "",
                 Team2Logo = row["team2_logo"]?.ToString(),
-                Status = Convert.ToInt32(row["status"]),
+                Status = status,
                 StartTime = Convert.ToDateTime(row["start_time"]),
                 BetDeadline = Convert.ToDateTime(row["bet_deadline"]),
-                Result = row["result"]?.ToString(),
-                Winner = row["winner"] != DBNull.Value ? Convert.ToInt32(row["winner"]) : null,
+                Result = exposeResult ? result : null,
+                Winner = exposeResult ? winner : null,
                 AvailableOptions = row["available_options"].ToString() ?? "[]",
                 Team1WinOdds = Convert.ToDecimal(row["team1_win_odds"]),
                 Team2WinOdds = Convert.ToDecimal(row["team2_win_odds"]),
