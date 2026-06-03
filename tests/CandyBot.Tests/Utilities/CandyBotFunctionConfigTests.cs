@@ -63,6 +63,7 @@ public class CandyBotFunctionConfigTests
                 ["ForzaHorizon"] = false,
                 ["Betting"] = false,
                 ["Betting_ReadOnly"] = true,
+                ["BettingAutomation"] = false,
             });
 
             CandyBotFunctionConfig config = new();
@@ -77,6 +78,7 @@ public class CandyBotFunctionConfigTests
             config.ForzaHorizon.Should().BeFalse();
             config.Betting.Should().BeFalse();
             config.Betting_ReadOnly.Should().BeTrue();
+            config.BettingAutomation.Should().BeFalse();
 
             return null;
         });

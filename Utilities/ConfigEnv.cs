@@ -30,6 +30,13 @@ namespace CandyCottage.CandyBot.Utilities
             return !string.IsNullOrWhiteSpace(value) && bool.TryParse(value, out bool parsed) ? parsed : current;
         }
 
+        /// <summary>int 覆盖：环境变量可解析为 int 时返回解析值，否则返回 <paramref name="current"/>。</summary>
+        public static int Override(string envName, int current)
+        {
+            string? value = Environment.GetEnvironmentVariable(envName);
+            return !string.IsNullOrWhiteSpace(value) && int.TryParse(value, out int parsed) ? parsed : current;
+        }
+
         /// <summary>枚举覆盖（大小写不敏感）：环境变量可解析为 <typeparamref name="TEnum"/> 时返回解析值，否则返回 <paramref name="current"/>。</summary>
         public static TEnum Override<TEnum>(string envName, TEnum current) where TEnum : struct, Enum
         {

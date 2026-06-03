@@ -13,6 +13,7 @@ namespace CandyCottage.CandyBot.Utilities
         public bool ForzaHorizon { get; set; } = true;
         public bool Betting { get; set; } = true;
         public bool Betting_ReadOnly { get; set; } = false;
+        public bool BettingAutomation { get; set; } = false;
 
         public Dictionary<string, (Action<CandyBotFunctionConfig, bool> Setter, string Description)> ToggleConfigs { get; } = new()
         {
@@ -24,6 +25,7 @@ namespace CandyCottage.CandyBot.Utilities
             { "地平线", ((config, value) => config.ForzaHorizon = value, "地平线模块") },
             { "赛事系统", ((config, value) => config.Betting = value, "赛事系统") },
             { "赛事只读", ((config, value) => config.Betting_ReadOnly = value, "赛事只读功能") },
+            { "赛事自动化", ((config, value) => config.BettingAutomation = value, "赛事自动化") },
         };
 
         public PluginConfig Config { get; set; } = new("candybot", "functions");
@@ -39,6 +41,7 @@ namespace CandyCottage.CandyBot.Utilities
             ForzaHorizon = Config.GetOrAdd("ForzaHorizon", ForzaHorizon);
             Betting = Config.GetOrAdd("Betting", Betting);
             Betting_ReadOnly = Config.GetOrAdd("Betting_ReadOnly", Betting_ReadOnly);
+            BettingAutomation = Config.GetOrAdd("BettingAutomation", BettingAutomation);
             Config.SaveConfig();
         }
     }

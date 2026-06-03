@@ -4,7 +4,7 @@ using Milimoe.FunGame.Core.Library.Constant;
 
 namespace CandyCottage.CandyBot.Services.SystemServices
 {
-    public class SystemInitializeService(ILogger<SystemInitializeService> logger, CandyBotConfig candybotConfig, SQLConnectionConfig sqlConfig, BotConfig botConfig, CandyBotFunctionConfig functionConfig, TencentDocsConfig tencentDocsConfig, DeepSeekConfig deepSeekConfig, CharacterModule characterModule, ItemModule itemModule, SkillModule skillModule) : IHostedService
+    public class SystemInitializeService(ILogger<SystemInitializeService> logger, CandyBotConfig candybotConfig, SQLConnectionConfig sqlConfig, BotConfig botConfig, CandyBotFunctionConfig functionConfig, TencentDocsConfig tencentDocsConfig, DeepSeekConfig deepSeekConfig, PandaScoreConfig pandaScoreConfig, CharacterModule characterModule, ItemModule itemModule, SkillModule skillModule) : IHostedService
     {
         public Task StartAsync(CancellationToken cancellationToken)
         {
@@ -16,6 +16,7 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             functionConfig.Init();
             tencentDocsConfig.Init();
             deepSeekConfig.Init();
+            pandaScoreConfig.Init();
             logger.LogInformation("加载 FunGame 模组 . . .");
             characterModule.Load();
             itemModule.Load();

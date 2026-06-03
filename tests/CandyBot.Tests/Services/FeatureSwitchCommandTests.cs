@@ -95,4 +95,37 @@ public class FeatureSwitchCommandTests
             try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
         }
     }
+
+    [Fact]
+    public async Task 管理员发送开启赛事自动化_应写入true并回复赛事自动化已开启()
+    {
+        string original = PluginConfig.RootPath;
+        string tmp = Path.Combine(Path.GetTempPath(), "candybot-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            PluginConfig.RootPath = tmp;
+            RecordingBotReplySender sender = new();
+            MemoryCache cache = new(new MemoryCacheOptions());
+            const string openid = "admin-openid";
+            cache.Set($"bot::{openid}", TestData.CreateUser(isAdmin: true, openid: openid), TimeSpan.FromMinutes(10));
+
+            CandyBotFunctionConfig cfg = new()
+            {
+                System = true,
+                BettingAutomation = false,
+                Config = new PluginConfig("candybot", "functions"),
+            };
+
+            CandyBotService svc = CreateService(sender, cfg, cache);
+            await svc.Handler(TestData.CreateMessage("开启赛事自动化", openid));
+
+            cfg.BettingAutomation.Should().BeTrue();
+            sender.TextContents.Should().ContainSingle().Which.Should().Be("赛事自动化已开启。");
+        }
+        finally
+        {
+            PluginConfig.RootPath = original;
+            try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
+        }
+    }
 }
