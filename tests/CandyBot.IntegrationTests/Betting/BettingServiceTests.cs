@@ -77,8 +77,8 @@ public class BettingServiceTests(MySqlFixture fixture)
             .Should().BeTrue(evtErr);
         eventId.Should().NotBeNull();
 
-        DateTime start = startTime ?? DateTime.Now.AddDays(1);
-        DateTime ddl = betDeadline ?? DateTime.Now.AddDays(1);
+        DateTime start = startTime ?? ChinaStandardTime.Now.AddDays(1);
+        DateTime ddl = betDeadline ?? ChinaStandardTime.Now.AddDays(1);
         bool ok = service.CreateMatch(
             (int)eventId!.Value, "队伍A", "队伍B", "小组赛",
             start, ddl, options, team1Odds, team2Odds, null, enableBet,
@@ -140,14 +140,55 @@ public class BettingServiceTests(MySqlFixture fixture)
     }
 
     [Fact]
+    public async Task PlaceBet_自动预填待确认结果后被拒绝()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+        BettingService service = new(sql, new CandyBotFunctionConfig());
+        long uid = SeedUser("u-pending-result", 50000);
+        long mid = SeedMatch(service, betDeadline: ChinaStandardTime.Now.AddDays(1), startTime: ChinaStandardTime.Now.AddHours(-2));
+
+        sql.Parameters["@mid"] = mid;
+        sql.Execute("UPDATE betting_matches SET result='2:1', winner=1, pending_settlement=1 WHERE id=@mid");
+
+        bool ok = service.PlaceBet(uid, mid, "team1", 1000, out string error);
+
+        ok.Should().BeFalse();
+        error.Should().Be("该比赛处于待确认结算阶段。");
+        using MySQLHelper probe = _fixture.CreateHelper();
+        probe.Parameters["@uid"] = uid;
+        probe.Parameters["@mid"] = mid;
+        probe.ExecuteDataSet("SELECT COUNT(*) AS c FROM betting_bet_records WHERE user_id=@uid AND match_id=@mid");
+        Convert.ToInt64(probe.DataSet.Tables[0].Rows[0]["c"]).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task PlaceBet_已有胜者预填但pending缺失时仍被拒绝()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+        BettingService service = new(sql, new CandyBotFunctionConfig());
+        long uid = SeedUser("u-prefilled-winner", 50000);
+        long mid = SeedMatch(service, betDeadline: ChinaStandardTime.Now.AddDays(1), startTime: ChinaStandardTime.Now.AddHours(-2));
+
+        sql.Parameters["@mid"] = mid;
+        sql.Execute("UPDATE betting_matches SET result='2:1', winner=1, pending_settlement=0 WHERE id=@mid");
+
+        bool ok = service.PlaceBet(uid, mid, "team1", 1000, out string error);
+
+        ok.Should().BeFalse();
+        error.Should().Be("该比赛处于待确认结算阶段。");
+    }
+
+    [Fact]
     public async Task PlaceBet_截止时间已过被拒绝()
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService service = new(sql, new CandyBotFunctionConfig());
         long uid = SeedUser("u-closed", 50000);
-        // 截止时间设在过去：DateTime.Now > deadline 成立
-        long mid = SeedMatch(service, betDeadline: DateTime.Now.AddMinutes(-5), startTime: DateTime.Now.AddDays(1));
+        // 截止时间设在过去：ChinaStandardTime.Now > deadline 成立
+        long mid = SeedMatch(service, betDeadline: ChinaStandardTime.Now.AddMinutes(-5), startTime: ChinaStandardTime.Now.AddDays(1));
 
         bool ok = service.PlaceBet(uid, mid, "team1", 1000, out string error);
 
@@ -293,7 +334,7 @@ public class BettingServiceTests(MySqlFixture fixture)
         long uid = SeedUser("u-resettle", 50000);
         // start_time 设在过去：否则 UpdateStatuses 会把 start_time>=now 的比赛状态重置为 0，
         // 从而无法触发“已结算”守卫（这是 UpdateStatuses 的既有行为，非本测试关注点）。
-        long mid = SeedMatch(service, startTime: DateTime.Now.AddDays(-1), betDeadline: DateTime.Now.AddDays(1));
+        long mid = SeedMatch(service, startTime: ChinaStandardTime.Now.AddDays(-1), betDeadline: ChinaStandardTime.Now.AddDays(1));
         service.PlaceBet(uid, mid, "team1", 1000, out _).Should().BeTrue();
 
         using (MySQLHelper s1 = _fixture.CreateHelper())
@@ -426,5 +467,33 @@ public class BettingServiceTests(MySqlFixture fixture)
         // 1 / (0.5 * 1.08) = 1.851... → 1.85（两位四舍五入）
         oddsA.Should().Be(1.85m);
         oddsB.Should().Be(1.85m);
+    }
+
+    [Fact]
+    public async Task Schema_赛事自动化字段存在且手工数据默认已发布()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+        BettingService service = new(sql, new CandyBotFunctionConfig());
+
+        service.CreateEvent("默认发布赛事", ChinaStandardTime.Now.AddDays(1), ChinaStandardTime.Now.AddDays(2), out string eventError, out long? eventId)
+            .Should().BeTrue(eventError);
+        service.CreateMatch((int)eventId!.Value, "NAVI", "FaZe", "小组赛", ChinaStandardTime.Now.AddDays(1), ChinaStandardTime.Now.AddDays(1),
+            "team1_win,team2_win", null, null, null, true, out string matchError, out long? matchId)
+            .Should().BeTrue(matchError);
+
+        using MySQLHelper probe = _fixture.CreateHelper();
+        probe.Parameters["@eid"] = eventId.Value;
+        DataRow? evt = probe.ExecuteDataRow("SELECT external_id, is_published FROM betting_events WHERE id=@eid");
+        evt.Should().NotBeNull();
+        evt!["external_id"].Should().Be(DBNull.Value);
+        Convert.ToInt32(evt["is_published"]).Should().Be(1);
+
+        probe.Parameters["@mid"] = matchId!.Value;
+        DataRow? match = probe.ExecuteDataRow("SELECT external_id, is_published, pending_settlement FROM betting_matches WHERE id=@mid");
+        match.Should().NotBeNull();
+        match!["external_id"].Should().Be(DBNull.Value);
+        Convert.ToInt32(match["is_published"]).Should().Be(1);
+        Convert.ToInt32(match["pending_settlement"]).Should().Be(0);
     }
 }

@@ -22,7 +22,7 @@ public class FeatureSwitchCommandTests
 {
     private static CandyBotService CreateService(IBotReplySender botService, CandyBotFunctionConfig cfg, IMemoryCache cache) =>
         new(NullLogger<CandyBotService>.Instance, cache, sql: null!, cfg, taskQueue: null!,
-            botService, bettingService: null!, sqlInitService: null!, userService: null!, forzaService: null!, forzaSheetImporter: null!);
+            botService, bettingService: null!, sqlInitService: null!, userService: null!, forzaService: null!, forzaSheetImporter: null!, esportsSyncService: null!);
 
     [Fact]
     public async Task 管理员发送关闭地平线_应写入false并回复地平线模块已关闭()
@@ -88,6 +88,39 @@ public class FeatureSwitchCommandTests
 
             cfg.Betting.Should().BeTrue();
             sender.TextContents.Should().ContainSingle().Which.Should().Be("赛事系统已开启。");
+        }
+        finally
+        {
+            PluginConfig.RootPath = original;
+            try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task 管理员发送开启赛事自动化_应写入true并回复赛事自动化已开启()
+    {
+        string original = PluginConfig.RootPath;
+        string tmp = Path.Combine(Path.GetTempPath(), "candybot-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            PluginConfig.RootPath = tmp;
+            RecordingBotReplySender sender = new();
+            MemoryCache cache = new(new MemoryCacheOptions());
+            const string openid = "admin-openid";
+            cache.Set($"bot::{openid}", TestData.CreateUser(isAdmin: true, openid: openid), TimeSpan.FromMinutes(10));
+
+            CandyBotFunctionConfig cfg = new()
+            {
+                System = true,
+                BettingAutomation = false,
+                Config = new PluginConfig("candybot", "functions"),
+            };
+
+            CandyBotService svc = CreateService(sender, cfg, cache);
+            await svc.Handler(TestData.CreateMessage("开启赛事自动化", openid));
+
+            cfg.BettingAutomation.Should().BeTrue();
+            sender.TextContents.Should().ContainSingle().Which.Should().Be("赛事自动化已开启。");
         }
         finally
         {

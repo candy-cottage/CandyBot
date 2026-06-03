@@ -2,6 +2,7 @@ using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Modules;
 using CandyCottage.CandyBot.Services;
 using CandyCottage.CandyBot.Services.BotServices;
+using CandyCottage.CandyBot.Services.Esports;
 using CandyCottage.CandyBot.Services.SystemServices;
 using CandyCottage.CandyBot.Utilities;
 using Microsoft.AspNetCore.Authentication;
@@ -42,6 +43,7 @@ builder.Services.AddSingleton<SQLConnectionConfig>();
 builder.Services.AddSingleton<CandyBotFunctionConfig>();
 builder.Services.AddSingleton<TencentDocsConfig>();
 builder.Services.AddSingleton<DeepSeekConfig>();
+builder.Services.AddSingleton<PandaScoreConfig>();
 builder.Services.AddSingleton<CharacterModule>();
 builder.Services.AddSingleton<ItemModule>();
 builder.Services.AddSingleton<SkillModule>();
@@ -69,6 +71,12 @@ builder.Services.AddScoped<ISheetParseDiagnostic>(sp =>
         : sp.GetRequiredService<NoOpSheetParseDiagnostic>();
 });
 builder.Services.AddScoped<IForzaSheetImporter, ForzaSheetImporter>();
+// 赛事自动化：PandaScoreProvider 的构造函数需要一个裸 HttpClient。
+// 用 typed client 注册既注入配置好的 HttpClient，又把它绑定为 IEsportsDataProvider 实现，
+// 避免 AddScoped<IEsportsDataProvider, PandaScoreProvider>() 在启动时因无法解析 HttpClient 而抛异常。
+builder.Services.AddScoped<EsportsSyncService>();
+builder.Services.AddHttpClient<IEsportsDataProvider, PandaScoreProvider>();
+builder.Services.AddHostedService<EsportsSyncHostedService>();
 builder.Services.AddScoped<CandyBotService>();
 builder.Services.AddHostedService<SystemInitializedService>();
 builder.Services.AddHostedService<ConsoleInputService>();

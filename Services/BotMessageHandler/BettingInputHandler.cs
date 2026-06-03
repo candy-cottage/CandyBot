@@ -1,4 +1,5 @@
 ﻿using CandyCottage.CandyBot.Models;
+using CandyCottage.CandyBot.Utilities;
 using Milimoe.FunGame.Core.Entity;
 using Milimoe.FunGame.Core.Library.Constant;
 using ProjectRedbud.FunGame.SQLQueryExtension;
@@ -46,6 +47,103 @@ public partial class CandyBotService
                 ]);
             }
             reply.Keyboard = new KeyboardMessage().AppendButtons(2, buttons);
+            await botService.SendAsync(e, reply);
+            return true;
+        }
+
+        // 立即同步赛事：管理员手动触发一次赛程抓取 + 结果预填（受赛事自动化开关控制）
+        if (e.Detail == "立即同步赛事")
+        {
+            if (!await CheckUser(e, user, false)) return true;
+            if (!WillGoOn(functionConfig.BettingAutomation, user))
+            {
+                await botService.SendAsync(e, "赛事自动化正在维护，请稍后再试。");
+                return true;
+            }
+
+            try
+            {
+                EsportsScheduleSyncReport schedules = await esportsSyncService.SyncSchedulesAsync();
+                EsportsResultSyncReport results = await esportsSyncService.SyncResultsAsync();
+                md.Content = $"同步完成：抓取 {schedules.Fetched} 场，新增草稿 {schedules.MatchesCreated} 场，更新 {schedules.MatchesUpdated} 场；结果检查 {results.Checked} 场，待确认 {results.PendingSettlementCreated} 场。";
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2,
+                    Button.CreateCmdButton("📋 待发布列表", "待发布比赛"),
+                    Button.CreateCmdButton("✅ 待确认结算", "待确认结算"),
+                    Button.CreateCmdButton("📅 比赛列表", "比赛列表"));
+            }
+            catch (Exception ex)
+            {
+                // 数据源异常（网络 / 5xx / JSON 解析等）不得静默——保证管理员总能收到反馈。
+                if (logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Error)) logger.LogError(ex, "立即同步赛事失败");
+                md.Content = $"赛事同步失败：{ex.Message}";
+            }
+            await botService.SendAsync(e, reply);
+            return true;
+        }
+
+        // 待发布比赛：管理员查看草稿（未发布）比赛列表
+        if (e.Detail.StartsWith("待发布比赛"))
+        {
+            if (!await CheckUser(e, user, false)) return true;
+
+            int page = 1;
+            string detail = e.Detail.Replace("待发布比赛", "").Trim();
+            System.Text.RegularExpressions.Match match = GetFirstNumber().Match(detail);
+            if (match.Success && int.TryParse(match.Value, out int p)) page = p;
+
+            var (content, totalPages) = bettingService.GetPendingPublishMatches(page);
+            md.Content = content;
+            KeyboardMessage kb = new();
+            if (totalPages > 1) kb.AddPaginationRow("待发布比赛 ", page, totalPages);
+            kb.AppendButtonsWithNewRow(2,
+                Button.CreateCmdButton("发布比赛", "发布比赛 ", enter: false),
+                Button.CreateCmdButton("立即同步赛事", "立即同步赛事"),
+                Button.CreateCmdButton("待确认结算", "待确认结算"));
+            reply.Keyboard = kb;
+            await botService.SendAsync(e, reply);
+            return true;
+        }
+
+        // 待确认结算：管理员查看自动预填结果、等待二次确认的比赛列表
+        if (e.Detail.StartsWith("待确认结算"))
+        {
+            if (!await CheckUser(e, user, false)) return true;
+
+            int page = 1;
+            string detail = e.Detail.Replace("待确认结算", "").Trim();
+            System.Text.RegularExpressions.Match match = GetFirstNumber().Match(detail);
+            if (match.Success && int.TryParse(match.Value, out int p)) page = p;
+
+            var (content, totalPages) = bettingService.GetPendingSettlementMatches(page);
+            md.Content = content;
+            KeyboardMessage kb = new();
+            if (totalPages > 1) kb.AddPaginationRow("待确认结算 ", page, totalPages);
+            kb.AppendButtonsWithNewRow(2,
+                Button.CreateCmdButton("确认结算", "确认结算 ", enter: false),
+                Button.CreateCmdButton("立即同步赛事", "立即同步赛事"));
+            reply.Keyboard = kb;
+            await botService.SendAsync(e, reply);
+            return true;
+        }
+
+        // 发布比赛：管理员将草稿比赛连同父赛事一并发布
+        if (e.Detail.StartsWith("发布比赛"))
+        {
+            if (!await CheckUser(e, user, false)) return true;
+
+            string detail = e.Detail.Replace("发布比赛", "").Trim();
+            if (!int.TryParse(detail, out int matchId))
+            {
+                await botService.SendAsync(e, "格式：发布比赛 <比赛ID>");
+                return true;
+            }
+
+            md.Content = bettingService.PublishMatch(matchId, out string error)
+                ? $"比赛 {matchId} 已发布。"
+                : error;
+            reply.Keyboard = new KeyboardMessage().AppendButtons(2,
+                Button.CreateCmdButton("🔍 比赛详情", $"比赛详情 {matchId}"),
+                Button.CreateCmdButton("📋 待发布比赛", "待发布比赛"));
             await botService.SendAsync(e, reply);
             return true;
         }
@@ -317,6 +415,26 @@ public partial class CandyBotService
             }
 
             reply.Keyboard = kb;
+            await botService.SendAsync(e, reply);
+            return true;
+        }
+
+        // 确认结算：管理员确认自动预填的比赛结果，复用结算派彩路径并清除待确认标记
+        if (e.Detail.StartsWith("确认结算"))
+        {
+            if (!await CheckUser(e, user, false)) return true;
+
+            string detail = e.Detail.Replace("确认结算", "").Trim();
+            if (!int.TryParse(detail, out int matchId))
+            {
+                await botService.SendAsync(e, "格式：确认结算 <比赛ID>");
+                return true;
+            }
+
+            md.Content = bettingService.ConfirmPendingSettlement(matchId);
+            reply.Keyboard = new KeyboardMessage().AppendButtons(2,
+                Button.CreateCmdButton("🔍 比赛详情", $"比赛详情 {matchId}"),
+                Button.CreateCmdButton("📅 比赛列表", "比赛列表"));
             await botService.SendAsync(e, reply);
             return true;
         }
@@ -782,7 +900,7 @@ public partial class CandyBotService
             DateTime newStart = oldStart.AddMinutes(-minutes);
             DateTime newDeadline = oldDeadline.AddMinutes(-minutes);
 
-            if (newDeadline < DateTime.Now)
+            if (newDeadline < ChinaStandardTime.Now)
             {
                 md.Content = $"⚠️ 注意：提前后截止时间为 {newDeadline:yyyy-MM-dd HH:mm}，已经早于当前时间，预测将立即锁定。\n";
             }

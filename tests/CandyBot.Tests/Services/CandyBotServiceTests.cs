@@ -41,7 +41,8 @@ public class CandyBotServiceTests
             sqlInitService: null!,
             userService: null!,
             forzaService: null!,
-            forzaSheetImporter);
+            forzaSheetImporter,
+            esportsSyncService: null!);
 
     private static MemoryCache NewCache() => new(new MemoryCacheOptions());
 

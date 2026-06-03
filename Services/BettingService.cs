@@ -16,7 +16,7 @@ namespace CandyCottage.CandyBot.Services
             UpdateStatuses();
 
             // 获取总数
-            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_events");
+            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_events WHERE is_published = 1");
             int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
             int totalPages = (int)Math.Ceiling(total / (double)pageSize);
             if (page > totalPages) page = totalPages;
@@ -30,7 +30,8 @@ namespace CandyCottage.CandyBot.Services
             sql.ExecuteDataSet($@"
                 SELECT id, name, status, start_time, end_time
                 FROM betting_events
-                ORDER BY 
+                WHERE is_published = 1
+                ORDER BY
                     CASE status WHEN 1 THEN 0 WHEN 0 THEN 1 ELSE 2 END,
                     CASE WHEN status = 2 THEN end_time END DESC,
                     CASE WHEN status != 2 THEN start_time END ASC
@@ -62,7 +63,7 @@ namespace CandyCottage.CandyBot.Services
 
             // 获取赛事信息
             sql.Parameters["@id"] = eventId;
-            sql.ExecuteDataSet("SELECT * FROM betting_events WHERE id = @id");
+            sql.ExecuteDataSet("SELECT * FROM betting_events WHERE id = @id AND is_published = 1");
             if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
                 return ("赛事不存在。", 0);
             DataRow evt = sql.DataSet.Tables[0].Rows[0];
@@ -79,7 +80,7 @@ namespace CandyCottage.CandyBot.Services
 
             // 比赛总数
             sql.Parameters["@eid"] = eventId;
-            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_matches WHERE event_id = @eid");
+            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_matches WHERE event_id = @eid AND is_published = 1");
             int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
             int totalPages = (int)Math.Ceiling(total / (double)pageSize);
             if (page > totalPages) page = totalPages;
@@ -93,8 +94,8 @@ namespace CandyCottage.CandyBot.Services
             sql.ExecuteDataSet($@"
                 SELECT id, team1_name, team2_name, status, bet_deadline, stage, start_time, result, betting_enabled
                 FROM betting_matches
-                WHERE event_id = @eid
-                ORDER BY 
+                WHERE event_id = @eid AND is_published = 1
+                ORDER BY
                     CASE status WHEN 1 THEN 0 WHEN 0 THEN 1 ELSE 2 END,
                     CASE WHEN status = 2 THEN start_time END DESC,
                     CASE WHEN status != 2 THEN start_time END ASC
@@ -117,7 +118,7 @@ namespace CandyCottage.CandyBot.Services
                     string mStatusStr = mstatus switch { 0 => "未开始", 1 => "进行中", 2 => "已结束", 3 => "已取消", _ => "未知" };
                     string matchLabel = $"{t1} vs {t2}";
                     string clickableMatch = matchLabel.CreateCmdInput($"比赛详情 {mid}");
-                    string ddl = deadline > DateTime.Now && mstatus == 0 && bettingEnabled ? $"截止：{deadline:MM-dd HH:mm}" : $"开赛：{startTime:MM-dd HH:mm}";
+                    string ddl = deadline > ChinaStandardTime.Now && mstatus == 0 && bettingEnabled ? $"截止：{deadline:MM-dd HH:mm}" : $"开赛：{startTime:MM-dd HH:mm}";
                     matches.AppendLine($"  [{mid}] {(stage != "" ? $"{stage} " : "")} {clickableMatch} (状态：{mStatusStr}{(result.Trim() != "" ? $" | 结果：{result}" : "")} | {ddl})");
                 }
             }
@@ -139,7 +140,7 @@ namespace CandyCottage.CandyBot.Services
             UpdateStatuses();
 
             // 总数
-            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_matches");
+            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_matches m JOIN betting_events e ON m.event_id = e.id WHERE m.is_published = 1 AND e.is_published = 1");
             int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
             int totalPages = (int)Math.Ceiling(total / (double)pageSize);
             if (page > totalPages) page = totalPages;
@@ -154,7 +155,8 @@ namespace CandyCottage.CandyBot.Services
                        e.name AS event_name, e.id AS event_id, m.result
                 FROM betting_matches m
                 LEFT JOIN betting_events e ON m.event_id = e.id
-                ORDER BY 
+                WHERE m.is_published = 1 AND e.is_published = 1
+                ORDER BY
                     CASE m.status WHEN 1 THEN 0 WHEN 0 THEN 1 ELSE 2 END,
                     CASE WHEN m.status = 2 THEN m.start_time END DESC,
                     CASE WHEN m.status != 2 THEN m.start_time END ASC
@@ -189,6 +191,134 @@ namespace CandyCottage.CandyBot.Services
             return (sb.ToString().TrimEnd(), totalPages);
         }
 
+        /// <summary>
+        /// 列出所有未发布（草稿）比赛，供管理员发布前预览。与用户可见列表不同，这里只过滤
+        /// <c>is_published = 0</c>，不要求父赛事已发布——草稿比赛的父赛事通常也是草稿。
+        /// </summary>
+        public (string, int) GetPendingPublishMatches(int page, int pageSize = 10)
+        {
+            if (sql == null) return ("数据库连接失败。", 0);
+
+            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_matches WHERE is_published = 0");
+            int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
+            int totalPages = (int)Math.Ceiling(total / (double)pageSize);
+            if (page > totalPages) page = totalPages;
+            if (page < 1) page = 1;
+            if (total == 0) return ("暂无待发布比赛。", 1);
+
+            int offset = (page - 1) * pageSize;
+            sql.ExecuteDataSet($@"
+                SELECT m.id, m.team1_name, m.team2_name, m.stage, m.start_time, e.name AS event_name
+                FROM betting_matches m
+                JOIN betting_events e ON e.id = m.event_id
+                WHERE m.is_published = 0
+                ORDER BY m.start_time ASC
+                LIMIT {pageSize} OFFSET {offset}");
+
+            StringBuilder sb = new();
+            sb.AppendLine($"待发布比赛{(totalPages > 1 ? $"（第 {page}/{totalPages} 页）" : "")}");
+            foreach (DataRow row in sql.DataSet.Tables[0].Rows)
+            {
+                long id = Convert.ToInt64(row["id"]);
+                sb.AppendLine($"[{id}] {row["event_name"]} {row["stage"]} {row["team1_name"]} vs {row["team2_name"]} | {Convert.ToDateTime(row["start_time"]):yyyy-MM-dd HH:mm}");
+            }
+            return (sb.ToString().TrimEnd(), totalPages);
+        }
+
+        /// <summary>
+        /// 列出外部数据源已预填结果、等待管理员二次确认结算的比赛。
+        /// </summary>
+        public (string, int) GetPendingSettlementMatches(int page, int pageSize = 10)
+        {
+            if (sql == null) return ("数据库连接失败。", 0);
+
+            sql.ExecuteDataSet(@"SELECT COUNT(*)
+                FROM betting_matches m
+                JOIN betting_events e ON e.id = m.event_id
+                WHERE m.pending_settlement = 1
+                  AND m.is_published = 1
+                  AND e.is_published = 1
+                  AND m.status IN (0, 1)");
+            int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
+            int totalPages = (int)Math.Ceiling(total / (double)pageSize);
+            if (page > totalPages) page = totalPages;
+            if (page < 1) page = 1;
+            if (total == 0) return ("暂无待确认结算比赛。", 1);
+
+            int offset = (page - 1) * pageSize;
+            sql.ExecuteDataSet($@"
+                SELECT m.id, m.team1_name, m.team2_name, m.stage, m.start_time, m.result, e.name AS event_name
+                FROM betting_matches m
+                JOIN betting_events e ON e.id = m.event_id
+                WHERE m.pending_settlement = 1
+                  AND m.is_published = 1
+                  AND e.is_published = 1
+                  AND m.status IN (0, 1)
+                ORDER BY m.start_time DESC
+                LIMIT {pageSize} OFFSET {offset}");
+
+            StringBuilder sb = new();
+            sb.AppendLine($"待确认结算比赛{(totalPages > 1 ? $"（第 {page}/{totalPages} 页）" : "")}");
+            foreach (DataRow row in sql.DataSet.Tables[0].Rows)
+            {
+                long id = Convert.ToInt64(row["id"]);
+                string stage = row["stage"]?.ToString() ?? "";
+                string result = row["result"]?.ToString() ?? "";
+                sb.AppendLine($"[{id}] {row["event_name"]} {stage} {row["team1_name"]} vs {row["team2_name"]} | 结果：{result} | 确认结算 {id}");
+            }
+            return (sb.ToString().TrimEnd(), totalPages);
+        }
+
+        /// <summary>
+        /// 发布一场草稿比赛：在同一事务内将该比赛连同其父赛事一并标记为已发布
+        /// （<c>is_published = 1</c>）。重复发布是幂等的（再次置 1 无副作用）。
+        /// </summary>
+        public bool PublishMatch(int matchId, out string error)
+        {
+            error = "";
+            if (sql == null)
+            {
+                error = "数据库连接失败。";
+                return false;
+            }
+
+            try
+            {
+                sql.NewTransaction();
+                sql.Parameters["@mid"] = matchId;
+                sql.ExecuteDataSetForUpdate("SELECT id, event_id, is_published FROM betting_matches WHERE id=@mid");
+                if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
+                {
+                    error = "比赛不存在。";
+                    return false;
+                }
+
+                DataRow row = sql.DataSet.Tables[0].Rows[0];
+                long eventId = Convert.ToInt64(row["event_id"]);
+                sql.Parameters["@eid"] = eventId;
+                sql.Execute("UPDATE betting_events SET is_published=1 WHERE id=@eid");
+                sql.Parameters["@mid"] = matchId;
+                sql.Execute("UPDATE betting_matches SET is_published=1 WHERE id=@mid");
+                if (!sql.Success)
+                {
+                    error = "发布比赛失败。";
+                    return false;
+                }
+
+                sql.Commit();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"发布比赛失败，原因：{ex.Message}";
+                return false;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
         public string GetMatchDetail(long matchId, out KeyboardMessage kb)
         {
             kb = new KeyboardMessage();
@@ -197,7 +327,7 @@ namespace CandyCottage.CandyBot.Services
                 UpdateStatuses();
 
                 sql.Parameters["@mid"] = matchId;
-                sql.ExecuteDataSet("SELECT * FROM betting_matches WHERE id = @mid");
+                sql.ExecuteDataSet("SELECT * FROM betting_matches WHERE id = @mid AND is_published = 1");
                 if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0) return "比赛不存在。";
                 DataRow row = sql.DataSet.Tables[0].Rows[0];
                 long eventId = Convert.ToInt64(row["event_id"]);
@@ -222,7 +352,7 @@ namespace CandyCottage.CandyBot.Services
 
                 string eventName = "";
                 sql.Parameters["@eid"] = eventId;
-                DataRow? rowEvent = sql.ExecuteDataRow("SELECT name FROM betting_events WHERE id = @eid");
+                DataRow? rowEvent = sql.ExecuteDataRow("SELECT name FROM betting_events WHERE id = @eid AND is_published = 1");
                 if (rowEvent != null)
                 {
                     eventName = rowEvent["name"].ToString() ?? "";
@@ -263,7 +393,7 @@ namespace CandyCottage.CandyBot.Services
                     sb.AppendLine($"> 📝 {description}\r\n");
                 }
 
-                DateTime now = DateTime.Now;
+                DateTime now = ChinaStandardTime.Now;
                 bool canBet = (status == 0 || status == 1) && now < deadline && bettingEnabled;
                 if (!functionConfig.Betting_ReadOnly)
                 {
@@ -341,7 +471,7 @@ namespace CandyCottage.CandyBot.Services
             }
 
             sql.Parameters["@mid"] = matchId;
-            sql.ExecuteDataSet("SELECT start_time, bet_deadline, status FROM betting_matches WHERE id = @mid");
+            sql.ExecuteDataSet("SELECT start_time, bet_deadline, status FROM betting_matches WHERE id = @mid AND is_published = 1");
             if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
             {
                 error = "比赛不存在。";
@@ -362,7 +492,7 @@ namespace CandyCottage.CandyBot.Services
             {
                 // 检查比赛
                 sql.Parameters["@mid"] = matchId;
-                sql.ExecuteDataSet("SELECT * FROM betting_matches WHERE id = @mid");
+                sql.ExecuteDataSet("SELECT * FROM betting_matches WHERE id = @mid AND is_published = 1");
                 if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
                 {
                     error = "比赛不存在。";
@@ -374,12 +504,19 @@ namespace CandyCottage.CandyBot.Services
                 decimal team1Odds = Convert.ToDecimal(row["team1_win_odds"]);
                 decimal team2Odds = Convert.ToDecimal(row["team2_win_odds"]);
                 bool bettingEnabled = Convert.ToBoolean(row["betting_enabled"]);
+                bool pendingSettlement = Convert.ToBoolean(row["pending_settlement"]);
+                bool hasPrefilledWinner = row["winner"] != DBNull.Value;
+                if (pendingSettlement || (hasPrefilledWinner && status != 2))
+                {
+                    error = "该比赛处于待确认结算阶段。";
+                    return false;
+                }
                 if (!bettingEnabled)
                 {
                     error = "该比赛不开放预测。";
                     return false;
                 }
-                if (status == 2 || DateTime.Now > deadline)
+                if (status == 2 || ChinaStandardTime.Now > deadline)
                 {
                     error = "该比赛处于不可预测阶段。";
                     return false;
@@ -441,7 +578,7 @@ namespace CandyCottage.CandyBot.Services
                 sql.Parameters["@oval"] = optionValue;
                 sql.Parameters["@amt"] = amount;
                 sql.Parameters["@odds"] = oddsAtBet;
-                sql.Parameters["@time"] = DateTime.Now;
+                sql.Parameters["@time"] = ChinaStandardTime.Now;
                 sql.Execute("INSERT INTO betting_bet_records (user_id, match_id, option_type, option_value, amount, odds_at_bet, bet_time) VALUES (@uid, @mid, @otype, @oval, @amt, @odds, @time)");
                 if (!sql.Success)
                 {
@@ -570,6 +707,38 @@ namespace CandyCottage.CandyBot.Services
                 }
             }
             return "数据库连接失败。";
+        }
+
+        /// <summary>
+        /// 确认一场已被自动预填结果（pending_settlement=1）的比赛，复用 <see cref="SettleMatch"/> 完成派彩，
+        /// 成功后清除 pending 标记。本方法<b>不</b>重新实现派彩逻辑——所有发奖/置 status=2 仍由
+        /// <see cref="SettleMatch"/> 统一负责，这里只读取预填的 winner/result 并转译为其入参。
+        /// </summary>
+        public string ConfirmPendingSettlement(int matchId)
+        {
+            if (sql == null) return "数据库连接失败。";
+
+            sql.Parameters["@mid"] = matchId;
+            DataRow? row = sql.ExecuteDataRow("SELECT result, winner, pending_settlement FROM betting_matches WHERE id=@mid");
+            if (row is null) return "比赛不存在。";
+            if (Convert.ToInt32(row["pending_settlement"]) != 1) return "该比赛没有待确认结算结果。";
+
+            int winnerValue = row["winner"] != DBNull.Value ? Convert.ToInt32(row["winner"]) : 0;
+            string winner = winnerValue switch
+            {
+                1 => "team1",
+                2 => "team2",
+                _ => ""
+            };
+            string result = row["result"]?.ToString() ?? "";
+            string message = SettleMatch(matchId, winner, result);
+            // TODO(debt): 依赖 SettleMatch 面向用户的提示文案判断成功是脆弱耦合，更干净的契约应让 SettleMatch 返回成功 bool/结果结构体（暂缓：改签名需同步改 结算比赛 调用方，超出本次范围）。
+            if (message.Contains("结算完成", StringComparison.Ordinal))
+            {
+                sql.Parameters["@mid"] = matchId;
+                sql.Execute("UPDATE betting_matches SET pending_settlement=0 WHERE id=@mid");
+            }
+            return message;
         }
 
         public (string, int) GetMyBets(long uid, long mid = -1, int page = 1, int pageSize = 10)
@@ -726,7 +895,7 @@ namespace CandyCottage.CandyBot.Services
         /// </summary>
         private void UpdateStatuses()
         {
-            DateTime now = DateTime.Now;
+            DateTime now = ChinaStandardTime.Now;
 
             // 更新赛事状态：0→1 (进行中)，1→2 (已结束)
             sql.Parameters["@now"] = now;

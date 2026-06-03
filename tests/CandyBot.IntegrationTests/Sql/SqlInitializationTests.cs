@@ -97,4 +97,85 @@ public class SqlInitializationTests(MySqlFixture fixture)
             try { if (Directory.Exists(tempConfigDir)) Directory.Delete(tempConfigDir, recursive: true); } catch { }
         }
     }
+
+    [Fact]
+    public async Task EnsureBettingAutomationSchema_已初始化旧库_幂等补齐自动化字段()
+    {
+        (string freshDb, MySQLHelper sql) = await _fixture.CreateFreshDatabaseAsync();
+        try
+        {
+            sql.Execute(@"CREATE TABLE `betting_events` (
+                    `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+                    `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+                    `status` tinyint NOT NULL DEFAULT 0,
+                    `start_time` datetime NOT NULL,
+                    `end_time` datetime NOT NULL,
+                    `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            sql.Result.Should().NotBe(Milimoe.FunGame.Core.Library.Constant.SQLResult.SQLError);
+
+            sql.Execute(@"CREATE TABLE `betting_matches` (
+                    `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+                    `event_id` bigint unsigned NOT NULL,
+                    `stage` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                    `team1_name` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+                    `team2_name` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+                    `status` tinyint NOT NULL DEFAULT 0,
+                    `start_time` datetime NOT NULL,
+                    `bet_deadline` datetime NOT NULL,
+                    `result` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                    `winner` tinyint DEFAULT NULL,
+                    `available_options` json NOT NULL,
+                    `team1_win_odds` decimal(5,2) NOT NULL DEFAULT 2.00,
+                    `team2_win_odds` decimal(5,2) NOT NULL DEFAULT 2.00,
+                    `description` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
+                    `betting_enabled` tinyint(1) NOT NULL DEFAULT 1,
+                    `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`),
+                    KEY `idx_event_id` (`event_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            sql.Result.Should().NotBe(Milimoe.FunGame.Core.Library.Constant.SQLResult.SQLError);
+
+            sql.Execute("INSERT INTO betting_events (name, status, start_time, end_time) VALUES ('旧赛事', 0, NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY))");
+            long eventId = sql.LastInsertId;
+            sql.Parameters["@eid"] = eventId;
+            sql.Execute(@"INSERT INTO betting_matches (event_id, team1_name, team2_name, status, start_time, bet_deadline, available_options)
+                    VALUES (@eid, 'A', 'B', 0, NOW(), NOW(), '[""team1_win"",""team2_win""]')");
+
+            SQLTableInitializeService service = new(NullLogger<SQLTableInitializeService>.Instance, sql);
+
+            service.EnsureBettingAutomationSchema();
+            service.EnsureBettingAutomationSchema();
+
+            using MySQLHelper probe = _fixture.CreateHelper(freshDb);
+            probe.ExecuteDataSet("SELECT external_id, is_published FROM betting_events LIMIT 1");
+            probe.Result.Should().NotBe(Milimoe.FunGame.Core.Library.Constant.SQLResult.SQLError);
+            probe.DataSet.Tables[0].Rows[0]["external_id"].Should().Be(DBNull.Value);
+            Convert.ToInt32(probe.DataSet.Tables[0].Rows[0]["is_published"]).Should().Be(1);
+
+            probe.ExecuteDataSet("SELECT external_id, is_published, pending_settlement FROM betting_matches LIMIT 1");
+            probe.Result.Should().NotBe(Milimoe.FunGame.Core.Library.Constant.SQLResult.SQLError);
+            probe.DataSet.Tables[0].Rows[0]["external_id"].Should().Be(DBNull.Value);
+            Convert.ToInt32(probe.DataSet.Tables[0].Rows[0]["is_published"]).Should().Be(1);
+            Convert.ToInt32(probe.DataSet.Tables[0].Rows[0]["pending_settlement"]).Should().Be(0);
+
+            probe.ExecuteDataSet("SHOW INDEX FROM betting_matches WHERE Key_name = 'idx_matches_pending_settlement'");
+            probe.DataSet.Tables[0].Rows.Count.Should().BeGreaterThan(0);
+
+            probe.ExecuteDataSet("SHOW INDEX FROM betting_events WHERE Key_name = 'idx_events_external_id'");
+            probe.DataSet.Tables[0].Rows.Count.Should().BeGreaterThan(0);
+            Convert.ToInt32(probe.DataSet.Tables[0].Rows[0]["Non_unique"]).Should().Be(0);
+
+            probe.ExecuteDataSet("SHOW INDEX FROM betting_matches WHERE Key_name = 'idx_matches_external_id'");
+            probe.DataSet.Tables[0].Rows.Count.Should().BeGreaterThan(0);
+            Convert.ToInt32(probe.DataSet.Tables[0].Rows[0]["Non_unique"]).Should().Be(0);
+        }
+        finally
+        {
+            sql.Dispose();
+        }
+    }
 }

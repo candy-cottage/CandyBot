@@ -88,3 +88,19 @@ ALTER TABLE `betting_bet_records`
 ALTER TABLE `betting_matches`
     MODIFY COLUMN `status` tinyint NOT NULL DEFAULT 0 COMMENT '比赛状态：0=未开始，1=进行中，2=已结束，3=已取消',
     ADD COLUMN `betting_enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否允许预测：1=允许，0=禁止' AFTER `description`;
+
+-- 赛事自动化：外部源锚点 + 草稿可见性
+ALTER TABLE `betting_events`
+    ADD COLUMN `external_id` VARCHAR(64) NULL COMMENT '外部数据源赛事ID，手工创建为NULL' AFTER `id`,
+    ADD COLUMN `is_published` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否对用户可见：0=草稿，1=已发布' AFTER `external_id`;
+
+ALTER TABLE `betting_matches`
+    ADD COLUMN `external_id` VARCHAR(64) NULL COMMENT '外部数据源比赛ID，手工创建为NULL' AFTER `id`,
+    ADD COLUMN `is_published` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否对用户可见：0=草稿，1=已发布' AFTER `external_id`,
+    ADD COLUMN `pending_settlement` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '结果已预填待管理员确认结算：0=否，1=是' AFTER `is_published`;
+
+CREATE UNIQUE INDEX `idx_events_external_id` ON `betting_events` (`external_id`);
+CREATE INDEX `idx_events_is_published` ON `betting_events` (`is_published`);
+CREATE UNIQUE INDEX `idx_matches_external_id` ON `betting_matches` (`external_id`);
+CREATE INDEX `idx_matches_is_published` ON `betting_matches` (`is_published`);
+CREATE INDEX `idx_matches_pending_settlement` ON `betting_matches` (`pending_settlement`);

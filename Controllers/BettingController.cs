@@ -23,9 +23,14 @@ namespace CandyCottage.CandyBot.Controllers
             if (sql == null) return StatusCode(500, "数据库连接失败");
             sql.ClearParametersAfterExecute = false;
 
-            // 动态条件
-            string where = status.HasValue ? "WHERE status = @status" : "";
-            if (status.HasValue) sql.Parameters["@status"] = status.Value;
+            // 匿名端点只暴露已发布赛事；is_published = 1 始终生效，再与可选的状态过滤 AND。
+            var conditions = new List<string> { "is_published = 1" };
+            if (status.HasValue)
+            {
+                conditions.Add("status = @status");
+                sql.Parameters["@status"] = status.Value;
+            }
+            string where = "WHERE " + string.Join(" AND ", conditions);
 
             // 总数
             sql.ExecuteDataSet($"SELECT COUNT(*) FROM betting_events {where}");
@@ -63,7 +68,7 @@ namespace CandyCottage.CandyBot.Controllers
             sql.ClearParametersAfterExecute = false;
 
             sql.Parameters["@id"] = id;
-            DataRow? row = sql.ExecuteDataRow("SELECT * FROM betting_events WHERE id = @id");
+            DataRow? row = sql.ExecuteDataRow("SELECT * FROM betting_events WHERE id = @id AND is_published = 1");
             if (row == null) return NotFound();
 
             return Ok(MapEvent(row));
@@ -83,7 +88,8 @@ namespace CandyCottage.CandyBot.Controllers
             if (sql == null) return StatusCode(500, "数据库连接失败");
             sql.ClearParametersAfterExecute = false;
 
-            var conditions = new List<string>();
+            // 匿名端点只暴露已发布比赛；is_published = 1 始终生效，再与可选的 event_id/status 过滤 AND。
+            var conditions = new List<string> { "is_published = 1" };
             if (eventId.HasValue)
             {
                 conditions.Add("event_id = @eventId");
@@ -94,7 +100,7 @@ namespace CandyCottage.CandyBot.Controllers
                 conditions.Add("status = @status");
                 sql.Parameters["@status"] = status.Value;
             }
-            string where = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
+            string where = "WHERE " + string.Join(" AND ", conditions);
 
             sql.ExecuteDataSet($"SELECT COUNT(*) FROM betting_matches {where}");
             int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
@@ -131,7 +137,7 @@ namespace CandyCottage.CandyBot.Controllers
             sql.ClearParametersAfterExecute = false;
 
             sql.Parameters["@id"] = id;
-            DataRow? row = sql.ExecuteDataRow("SELECT * FROM betting_matches WHERE id = @id");
+            DataRow? row = sql.ExecuteDataRow("SELECT * FROM betting_matches WHERE id = @id AND is_published = 1");
             if (row == null) return NotFound();
 
             return Ok(MapMatch(row));
@@ -204,6 +210,8 @@ namespace CandyCottage.CandyBot.Controllers
             return new BettingEvent
             {
                 Id = Convert.ToInt32(row["id"]),
+                ExternalId = row["external_id"] != DBNull.Value ? row["external_id"].ToString() : null,
+                IsPublished = Convert.ToInt32(row["is_published"]) == 1,
                 Name = row["name"].ToString() ?? "",
                 Status = Convert.ToInt32(row["status"]),
                 StartTime = Convert.ToDateTime(row["start_time"]),
@@ -215,20 +223,29 @@ namespace CandyCottage.CandyBot.Controllers
 
         private static BettingMatch MapMatch(DataRow row)
         {
+            int status = Convert.ToInt32(row["status"]);
+            bool pendingSettlement = Convert.ToInt32(row["pending_settlement"]) == 1;
+            bool exposeResult = status == 2 && !pendingSettlement;
+            string? result = row["result"] != DBNull.Value ? row["result"].ToString() : null;
+            int? winner = row["winner"] != DBNull.Value ? Convert.ToInt32(row["winner"]) : null;
+
             return new BettingMatch
             {
                 Id = Convert.ToInt32(row["id"]),
+                ExternalId = row["external_id"] != DBNull.Value ? row["external_id"].ToString() : null,
+                IsPublished = Convert.ToInt32(row["is_published"]) == 1,
+                PendingSettlement = pendingSettlement,
                 EventId = Convert.ToInt32(row["event_id"]),
                 Stage = row["stage"]?.ToString(),
                 Team1Name = row["team1_name"].ToString() ?? "",
                 Team1Logo = row["team1_logo"]?.ToString(),
                 Team2Name = row["team2_name"].ToString() ?? "",
                 Team2Logo = row["team2_logo"]?.ToString(),
-                Status = Convert.ToInt32(row["status"]),
+                Status = status,
                 StartTime = Convert.ToDateTime(row["start_time"]),
                 BetDeadline = Convert.ToDateTime(row["bet_deadline"]),
-                Result = row["result"]?.ToString(),
-                Winner = row["winner"] != DBNull.Value ? Convert.ToInt32(row["winner"]) : null,
+                Result = exposeResult ? result : null,
+                Winner = exposeResult ? winner : null,
                 AvailableOptions = row["available_options"].ToString() ?? "[]",
                 Team1WinOdds = Convert.ToDecimal(row["team1_win_odds"]),
                 Team2WinOdds = Convert.ToDecimal(row["team2_win_odds"]),

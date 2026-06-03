@@ -215,4 +215,36 @@ public class ConfigEnvOverrideTests
             (reloaded.GetOrAdd("ApiKey", "") ?? "").Should().Be("disk-key");
         });
     }
+
+    [Fact]
+    public void PandaScoreConfig_环境变量优先于持久化值且不写回()
+    {
+        WithEnvAndTempRoot(new Dictionary<string, string?>
+        {
+            ["CANDYBOT_PANDASCORE_APIKEY"] = "env-key",
+            ["CANDYBOT_PANDASCORE_BASEURL"] = "https://api.pandascore.co",
+            ["CANDYBOT_PANDASCORE_GAMESLUG"] = "csgo",
+            ["CANDYBOT_PANDASCORE_SCHEDULEPOLLINTERVALMINUTES"] = "30",
+            ["CANDYBOT_PANDASCORE_RESULTPOLLINTERVALMINUTES"] = "5",
+        }, () =>
+        {
+            PluginConfig seed = new("candybot", "pandascore");
+            seed.LoadConfig();
+            seed["ApiKey"] = "disk-key";
+            seed.SaveConfig();
+
+            PandaScoreConfig config = new();
+            config.Init();
+
+            config.ApiKey.Should().Be("env-key");
+            config.BaseUrl.Should().Be("https://api.pandascore.co");
+            config.GameSlug.Should().Be("csgo");
+            config.SchedulePollInterval.Should().Be(TimeSpan.FromMinutes(30));
+            config.ResultPollInterval.Should().Be(TimeSpan.FromMinutes(5));
+
+            PluginConfig reloaded = new("candybot", "pandascore");
+            reloaded.LoadConfig();
+            (reloaded.GetOrAdd("ApiKey", "") ?? "").Should().Be("disk-key");
+        });
+    }
 }
