@@ -144,6 +144,8 @@ public sealed class EsportsSyncService(
     private void UpsertMatch(long eventId, ExternalEsportsMatch match, ref int created, ref int updated)
     {
         (decimal t1Odds, decimal t2Odds) = ResolveOdds(match);
+        // provider 的 StartTime 为 UTC，在写库边界统一转为本地时间，与系统其余按本地时间（DateTime.Now）的比较保持一致。
+        DateTime localStart = match.StartTime.ToLocalTime();
 
         sql.Parameters["@external_id"] = match.ExternalId;
         DataRow? existing = sql.ExecuteDataRow("SELECT id, is_published, status FROM betting_matches WHERE external_id=@external_id");
@@ -157,20 +159,20 @@ public sealed class EsportsSyncService(
                 sql.Parameters["@t1"] = match.Team1Name;
                 sql.Parameters["@t2"] = match.Team2Name;
                 sql.Parameters["@stage"] = match.Stage;
-                sql.Parameters["@start"] = match.StartTime;
-                sql.Parameters["@deadline"] = match.StartTime;
+                sql.Parameters["@start"] = localStart;
+                sql.Parameters["@deadline"] = localStart;
                 sql.Parameters["@t1_odds"] = t1Odds;
                 sql.Parameters["@t2_odds"] = t2Odds;
                 sql.Execute(@"UPDATE betting_matches SET event_id=@eid, team1_name=@t1, team2_name=@t2, stage=@stage,
                     start_time=@start, bet_deadline=@deadline, team1_win_odds=@t1_odds, team2_win_odds=@t2_odds
                     WHERE id=@mid");
             }
-            // 与本地时钟比较只是“尚未开赛”的粗略判断；provider 的 StartTime 为 UTC，这里不做精确换算。
-            else if (match.StartTime > DateTime.Now)
+            // 与本地时钟比较只是“尚未开赛”的粗略判断（StartTime 已转本地，与 DateTime.Now 同框）。
+            else if (localStart > DateTime.Now)
             {
                 sql.Parameters["@mid"] = existing["id"];
-                sql.Parameters["@start"] = match.StartTime;
-                sql.Parameters["@deadline"] = match.StartTime;
+                sql.Parameters["@start"] = localStart;
+                sql.Parameters["@deadline"] = localStart;
                 sql.Execute("UPDATE betting_matches SET start_time=@start, bet_deadline=@deadline WHERE id=@mid AND status=0");
             }
             // updated 计的是“命中了已存在的 external_id”（幂等命中），并非“实际改动了行”——
@@ -185,8 +187,8 @@ public sealed class EsportsSyncService(
         sql.Parameters["@t1"] = match.Team1Name;
         sql.Parameters["@t2"] = match.Team2Name;
         sql.Parameters["@stage"] = match.Stage;
-        sql.Parameters["@start"] = match.StartTime;
-        sql.Parameters["@deadline"] = match.StartTime;
+        sql.Parameters["@start"] = localStart;
+        sql.Parameters["@deadline"] = localStart;
         sql.Parameters["@opts"] = options;
         sql.Parameters["@t1_odds"] = t1Odds;
         sql.Parameters["@t2_odds"] = t2Odds;

@@ -89,6 +89,29 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
     }
 
     [Fact]
+    public async Task SyncSchedulesAsync_UTC开赛时间在写库边界转为本地时间()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+
+        // provider 产出的 StartTime 为 UTC（Kind=Utc）；写库边界应转为本地时间，
+        // 与系统其余按 DateTime.Now（本地）的截止/状态比较保持一致。
+        DateTime utcStart = DateTime.SpecifyKind(new DateTime(2026, 6, 10, 12, 0, 0), DateTimeKind.Utc);
+        EsportsSyncService service = new(
+            NullLogger<EsportsSyncService>.Instance,
+            sql,
+            new BettingService(sql, new CandyBotFunctionConfig()),
+            new FakeProvider([Match("match-utc", utcStart)]),
+            new PandaScoreConfig { GameSlug = "csgo" });
+
+        await service.SyncSchedulesAsync();
+
+        DataRow? row = sql.ExecuteDataRow("SELECT start_time, bet_deadline FROM betting_matches WHERE external_id='match-utc'");
+        Convert.ToDateTime(row!["start_time"]).Should().BeCloseTo(utcStart.ToLocalTime(), TimeSpan.FromSeconds(1));
+        Convert.ToDateTime(row["bet_deadline"]).Should().BeCloseTo(utcStart.ToLocalTime(), TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
     public async Task SyncSchedulesAsync_已发布比赛重新同步_仅刷新开赛时间且不回退发布状态()
     {
         await _fixture.ResetDataAsync();
