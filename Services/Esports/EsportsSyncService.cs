@@ -1,5 +1,4 @@
 using System.Data;
-using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Utilities;
 using Milimoe.FunGame.Core.Api.Transmittal;
@@ -23,8 +22,7 @@ public sealed class EsportsSyncService(
     SQLHelper sql,
     BettingService bettingService,
     IEsportsDataProvider provider,
-    PandaScoreConfig config,
-    IBackgroundTaskQueue taskQueue)
+    PandaScoreConfig config)
 {
     public async Task<EsportsScheduleSyncReport> SyncSchedulesAsync(CancellationToken cancellationToken = default)
     {
@@ -62,6 +60,8 @@ public sealed class EsportsSyncService(
             sql.Parameters["@end"] = match.EventEndTime;
             sql.Parameters["@external_id"] = match.EventExternalId;
             sql.Execute("UPDATE betting_events SET name=@name, start_time=@start, end_time=@end WHERE external_id=@external_id AND is_published=0");
+            // updated 计的是“命中了已存在的 external_id”（幂等命中），并非“实际改动了行”——
+            // 已发布赛事会因 AND is_published=0 而匹配 0 行，但仍计入此处。
             updated++;
             return Convert.ToInt64(existing["id"]);
         }
@@ -100,6 +100,7 @@ public sealed class EsportsSyncService(
                     start_time=@start, bet_deadline=@deadline, team1_win_odds=@t1_odds, team2_win_odds=@t2_odds
                     WHERE id=@mid");
             }
+            // 与本地时钟比较只是“尚未开赛”的粗略判断；provider 的 StartTime 为 UTC，这里不做精确换算。
             else if (match.StartTime > DateTime.Now)
             {
                 sql.Parameters["@mid"] = existing["id"];
@@ -107,6 +108,8 @@ public sealed class EsportsSyncService(
                 sql.Parameters["@deadline"] = match.StartTime;
                 sql.Execute("UPDATE betting_matches SET start_time=@start, bet_deadline=@deadline WHERE id=@mid AND status=0");
             }
+            // updated 计的是“命中了已存在的 external_id”（幂等命中），并非“实际改动了行”——
+            // 已发布且 status!=0 的比赛会匹配 0 行，但仍计入此处。
             updated++;
             return;
         }

@@ -48,8 +48,7 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
             sql,
             new BettingService(sql, new CandyBotFunctionConfig()),
             new FakeProvider([Match("match-1", start)]),
-            new PandaScoreConfig { GameSlug = "csgo" },
-            taskQueue: null!);
+            new PandaScoreConfig { GameSlug = "csgo" });
 
         EsportsScheduleSyncReport first = await service.SyncSchedulesAsync();
         EsportsScheduleSyncReport second = await service.SyncSchedulesAsync();
@@ -74,8 +73,7 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
             sql,
             new BettingService(sql, new CandyBotFunctionConfig()),
             new FakeProvider([Match("match-2", start)]),
-            new PandaScoreConfig { GameSlug = "csgo" },
-            taskQueue: null!);
+            new PandaScoreConfig { GameSlug = "csgo" });
 
         await service.SyncSchedulesAsync();
 
@@ -88,5 +86,55 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
         Convert.ToDateTime(row["bet_deadline"]).Should().BeCloseTo(start, TimeSpan.FromSeconds(1));
         Convert.ToDecimal(row["team1_win_odds"]).Should().Be(1.85m);
         Convert.ToDecimal(row["team2_win_odds"]).Should().Be(1.85m);
+    }
+
+    [Fact]
+    public async Task SyncSchedulesAsync_已发布比赛重新同步_仅刷新开赛时间且不回退发布状态()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+
+        // 预置一个已发布赛事（external_id 与 FakeProvider 的锚点一致），赛事 UPDATE 带 AND is_published=0，应被原样保留。
+        DateTime eventStart = DateTime.Now.AddDays(1);
+        sql.Parameters["@start"] = eventStart;
+        sql.Parameters["@end"] = eventStart.AddDays(7);
+        sql.Execute("INSERT INTO betting_events (external_id, is_published, name, status, start_time, end_time) VALUES ('league:season:tournament', 1, '已发布赛事', 0, @start, @end)");
+        long eventId = sql.LastInsertId;
+
+        // 预置一个已发布、未开始的比赛，初始开赛/截止时间为 now+2d，并使用可辨识的队名以验证刷新分支不覆盖阵容。
+        DateTime initialStart = DateTime.Now.AddDays(2);
+        sql.Parameters["@eid"] = eventId;
+        sql.Parameters["@start"] = initialStart;
+        sql.Parameters["@deadline"] = initialStart;
+        sql.Execute(@"INSERT INTO betting_matches
+            (external_id, is_published, pending_settlement, event_id, team1_name, team2_name, stage, start_time, bet_deadline,
+             available_options, team1_win_odds, team2_win_odds, description, status, betting_enabled)
+            VALUES ('match-pub', 1, 0, @eid, 'OldTeam1', 'OldTeam2', '小组赛', @start, @deadline,
+             '[""team1_win"",""team2_win""]', 2.00, 2.00, '', 0, 1)");
+        long matchId = sql.LastInsertId;
+
+        // 用更晚的开赛时间（now+5d）触发已发布分支 else if (match.StartTime > DateTime.Now)。
+        DateTime newStart = DateTime.Now.AddDays(5);
+        EsportsSyncService service = new(
+            NullLogger<EsportsSyncService>.Instance,
+            sql,
+            new BettingService(sql, new CandyBotFunctionConfig()),
+            new FakeProvider([Match("match-pub", newStart)]),
+            new PandaScoreConfig { GameSlug = "csgo" });
+
+        await service.SyncSchedulesAsync();
+
+        sql.Parameters["@mid"] = matchId;
+        DataRow? match = sql.ExecuteDataRow("SELECT start_time, bet_deadline, is_published, status, team1_name, team2_name FROM betting_matches WHERE id=@mid");
+        Convert.ToDateTime(match!["start_time"]).Should().BeCloseTo(newStart, TimeSpan.FromSeconds(1));
+        Convert.ToDateTime(match["bet_deadline"]).Should().BeCloseTo(newStart, TimeSpan.FromSeconds(1));
+        Convert.ToInt32(match["is_published"]).Should().Be(1);
+        Convert.ToInt32(match["status"]).Should().Be(0);
+        match["team1_name"].ToString().Should().Be("OldTeam1");
+        match["team2_name"].ToString().Should().Be("OldTeam2");
+
+        sql.Parameters["@eid"] = eventId;
+        DataRow? evt = sql.ExecuteDataRow("SELECT is_published FROM betting_events WHERE id=@eid");
+        Convert.ToInt32(evt!["is_published"]).Should().Be(1);
     }
 }
