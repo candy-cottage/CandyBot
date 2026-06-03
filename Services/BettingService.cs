@@ -681,6 +681,7 @@ namespace CandyCottage.CandyBot.Services
             };
             string result = row["result"]?.ToString() ?? "";
             string message = SettleMatch(matchId, winner, result);
+            // TODO(debt): 依赖 SettleMatch 面向用户的提示文案判断成功是脆弱耦合，更干净的契约应让 SettleMatch 返回成功 bool/结果结构体（暂缓：改签名需同步改 结算比赛 调用方，超出本次范围）。
             if (message.Contains("结算完成", StringComparison.Ordinal))
             {
                 sql.Parameters["@mid"] = matchId;
