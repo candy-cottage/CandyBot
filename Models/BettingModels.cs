@@ -100,6 +100,12 @@ namespace CandyCottage.CandyBot.Models
         [JsonPropertyName("id")]
         public int Id { get; set; }
 
+        [JsonPropertyName("external_id")]
+        public string? ExternalId { get; set; }
+
+        [JsonPropertyName("is_published")]
+        public bool IsPublished { get; set; } = true;
+
         [JsonPropertyName("name")]
         public string Name { get; set; } = "";
 
@@ -123,6 +129,15 @@ namespace CandyCottage.CandyBot.Models
     {
         [JsonPropertyName("id")]
         public int Id { get; set; }
+
+        [JsonPropertyName("external_id")]
+        public string? ExternalId { get; set; }
+
+        [JsonPropertyName("is_published")]
+        public bool IsPublished { get; set; } = true;
+
+        [JsonPropertyName("pending_settlement")]
+        public bool PendingSettlement { get; set; }
 
         [JsonPropertyName("event_id")]
         public int EventId { get; set; }

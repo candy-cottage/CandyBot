@@ -427,4 +427,32 @@ public class BettingServiceTests(MySqlFixture fixture)
         oddsA.Should().Be(1.85m);
         oddsB.Should().Be(1.85m);
     }
+
+    [Fact]
+    public async Task Schema_赛事自动化字段存在且手工数据默认已发布()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+        BettingService service = new(sql, new CandyBotFunctionConfig());
+
+        service.CreateEvent("默认发布赛事", DateTime.Now.AddDays(1), DateTime.Now.AddDays(2), out string eventError, out long? eventId)
+            .Should().BeTrue(eventError);
+        service.CreateMatch((int)eventId!.Value, "NAVI", "FaZe", "小组赛", DateTime.Now.AddDays(1), DateTime.Now.AddDays(1),
+            "team1_win,team2_win", null, null, null, true, out string matchError, out long? matchId)
+            .Should().BeTrue(matchError);
+
+        using MySQLHelper probe = _fixture.CreateHelper();
+        probe.Parameters["@eid"] = eventId.Value;
+        DataRow? evt = probe.ExecuteDataRow("SELECT external_id, is_published FROM betting_events WHERE id=@eid");
+        evt.Should().NotBeNull();
+        evt!["external_id"].Should().Be(DBNull.Value);
+        Convert.ToInt32(evt["is_published"]).Should().Be(1);
+
+        probe.Parameters["@mid"] = matchId!.Value;
+        DataRow? match = probe.ExecuteDataRow("SELECT external_id, is_published, pending_settlement FROM betting_matches WHERE id=@mid");
+        match.Should().NotBeNull();
+        match!["external_id"].Should().Be(DBNull.Value);
+        Convert.ToInt32(match["is_published"]).Should().Be(1);
+        Convert.ToInt32(match["pending_settlement"]).Should().Be(0);
+    }
 }
