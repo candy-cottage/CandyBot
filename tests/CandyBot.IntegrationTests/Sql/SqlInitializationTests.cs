@@ -164,6 +164,14 @@ public class SqlInitializationTests(MySqlFixture fixture)
 
             probe.ExecuteDataSet("SHOW INDEX FROM betting_matches WHERE Key_name = 'idx_matches_pending_settlement'");
             probe.DataSet.Tables[0].Rows.Count.Should().BeGreaterThan(0);
+
+            probe.ExecuteDataSet("SHOW INDEX FROM betting_events WHERE Key_name = 'idx_events_external_id'");
+            probe.DataSet.Tables[0].Rows.Count.Should().BeGreaterThan(0);
+            Convert.ToInt32(probe.DataSet.Tables[0].Rows[0]["Non_unique"]).Should().Be(0);
+
+            probe.ExecuteDataSet("SHOW INDEX FROM betting_matches WHERE Key_name = 'idx_matches_external_id'");
+            probe.DataSet.Tables[0].Rows.Count.Should().BeGreaterThan(0);
+            Convert.ToInt32(probe.DataSet.Tables[0].Rows[0]["Non_unique"]).Should().Be(0);
         }
         finally
         {

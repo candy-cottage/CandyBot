@@ -105,6 +105,13 @@ internal static class PandaScoreMapper
         PandaScoreOpponent? team1 = (source.Opponents ?? []).ElementAtOrDefault(0)?.Opponent;
         PandaScoreOpponent? team2 = (source.Opponents ?? []).ElementAtOrDefault(1)?.Opponent;
         DateTime start = source.ScheduledAt ?? source.BeginAt ?? DateTime.UtcNow;
+        DateTime utcStart = start.Kind switch
+        {
+            DateTimeKind.Utc => start,
+            DateTimeKind.Local => start.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(start, DateTimeKind.Utc),
+        };
+        DateTime beijingStart = ChinaStandardTime.FromUtc(utcStart);
         string league = source.League?.Name ?? "";
         string serie = source.Serie?.FullName ?? source.Serie?.Name ?? "";
         string eventName = string.Join(" ", new[] { league, serie }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
@@ -114,12 +121,11 @@ internal static class PandaScoreMapper
             ExternalId: source.Id.ToString(),
             EventExternalId: $"{source.League?.Id}:{source.Serie?.Id}:{source.Tournament?.Id}",
             EventName: eventName,
-            // 赛事起止窗口由本地按开赛日合成（API 不提供赛事级时间区间）。
-            EventStartTime: start.Date,
-            EventEndTime: start.Date.AddDays(1),
+            EventStartTime: beijingStart.Date,
+            EventEndTime: beijingStart.Date.AddDays(1),
             Team1Name: team1?.Name ?? "",
             Team2Name: team2?.Name ?? "",
-            StartTime: DateTime.SpecifyKind(start, DateTimeKind.Utc),
+            StartTime: utcStart,
             Stage: source.Tournament?.Name ?? "",
             Team1WinProbability: null,
             Team1WinOdds: null,

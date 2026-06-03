@@ -77,8 +77,8 @@ public class BettingServiceTests(MySqlFixture fixture)
             .Should().BeTrue(evtErr);
         eventId.Should().NotBeNull();
 
-        DateTime start = startTime ?? DateTime.Now.AddDays(1);
-        DateTime ddl = betDeadline ?? DateTime.Now.AddDays(1);
+        DateTime start = startTime ?? ChinaStandardTime.Now.AddDays(1);
+        DateTime ddl = betDeadline ?? ChinaStandardTime.Now.AddDays(1);
         bool ok = service.CreateMatch(
             (int)eventId!.Value, "队伍A", "队伍B", "小组赛",
             start, ddl, options, team1Odds, team2Odds, null, enableBet,
@@ -146,7 +146,7 @@ public class BettingServiceTests(MySqlFixture fixture)
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService service = new(sql, new CandyBotFunctionConfig());
         long uid = SeedUser("u-pending-result", 50000);
-        long mid = SeedMatch(service, betDeadline: DateTime.Now.AddDays(1), startTime: DateTime.Now.AddHours(-2));
+        long mid = SeedMatch(service, betDeadline: ChinaStandardTime.Now.AddDays(1), startTime: ChinaStandardTime.Now.AddHours(-2));
 
         sql.Parameters["@mid"] = mid;
         sql.Execute("UPDATE betting_matches SET result='2:1', winner=1, pending_settlement=1 WHERE id=@mid");
@@ -169,7 +169,7 @@ public class BettingServiceTests(MySqlFixture fixture)
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService service = new(sql, new CandyBotFunctionConfig());
         long uid = SeedUser("u-prefilled-winner", 50000);
-        long mid = SeedMatch(service, betDeadline: DateTime.Now.AddDays(1), startTime: DateTime.Now.AddHours(-2));
+        long mid = SeedMatch(service, betDeadline: ChinaStandardTime.Now.AddDays(1), startTime: ChinaStandardTime.Now.AddHours(-2));
 
         sql.Parameters["@mid"] = mid;
         sql.Execute("UPDATE betting_matches SET result='2:1', winner=1, pending_settlement=0 WHERE id=@mid");
@@ -187,8 +187,8 @@ public class BettingServiceTests(MySqlFixture fixture)
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService service = new(sql, new CandyBotFunctionConfig());
         long uid = SeedUser("u-closed", 50000);
-        // 截止时间设在过去：DateTime.Now > deadline 成立
-        long mid = SeedMatch(service, betDeadline: DateTime.Now.AddMinutes(-5), startTime: DateTime.Now.AddDays(1));
+        // 截止时间设在过去：ChinaStandardTime.Now > deadline 成立
+        long mid = SeedMatch(service, betDeadline: ChinaStandardTime.Now.AddMinutes(-5), startTime: ChinaStandardTime.Now.AddDays(1));
 
         bool ok = service.PlaceBet(uid, mid, "team1", 1000, out string error);
 
@@ -334,7 +334,7 @@ public class BettingServiceTests(MySqlFixture fixture)
         long uid = SeedUser("u-resettle", 50000);
         // start_time 设在过去：否则 UpdateStatuses 会把 start_time>=now 的比赛状态重置为 0，
         // 从而无法触发“已结算”守卫（这是 UpdateStatuses 的既有行为，非本测试关注点）。
-        long mid = SeedMatch(service, startTime: DateTime.Now.AddDays(-1), betDeadline: DateTime.Now.AddDays(1));
+        long mid = SeedMatch(service, startTime: ChinaStandardTime.Now.AddDays(-1), betDeadline: ChinaStandardTime.Now.AddDays(1));
         service.PlaceBet(uid, mid, "team1", 1000, out _).Should().BeTrue();
 
         using (MySQLHelper s1 = _fixture.CreateHelper())
@@ -476,9 +476,9 @@ public class BettingServiceTests(MySqlFixture fixture)
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService service = new(sql, new CandyBotFunctionConfig());
 
-        service.CreateEvent("默认发布赛事", DateTime.Now.AddDays(1), DateTime.Now.AddDays(2), out string eventError, out long? eventId)
+        service.CreateEvent("默认发布赛事", ChinaStandardTime.Now.AddDays(1), ChinaStandardTime.Now.AddDays(2), out string eventError, out long? eventId)
             .Should().BeTrue(eventError);
-        service.CreateMatch((int)eventId!.Value, "NAVI", "FaZe", "小组赛", DateTime.Now.AddDays(1), DateTime.Now.AddDays(1),
+        service.CreateMatch((int)eventId!.Value, "NAVI", "FaZe", "小组赛", ChinaStandardTime.Now.AddDays(1), ChinaStandardTime.Now.AddDays(1),
             "team1_win,team2_win", null, null, null, true, out string matchError, out long? matchId)
             .Should().BeTrue(matchError);
 

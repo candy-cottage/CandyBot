@@ -43,6 +43,32 @@ public class PandaScoreProviderTests
     }
 
     [Fact]
+    public void MapMatch_跨UTC日期比赛_赛事窗口默认使用北京时间日期()
+    {
+        const string json = """
+        {
+          "id": 647620,
+          "name": "NAVI vs FaZe",
+          "status": "not_started",
+          "scheduled_at": "2026-06-10T18:00:00Z",
+          "league": { "id": 11, "name": "ESL Pro League" },
+          "serie": { "id": 22, "full_name": "Season 23" },
+          "tournament": { "id": 33, "name": "Group Stage" },
+          "opponents": [
+            { "opponent": { "id": 100, "name": "NAVI" }, "type": "Team" },
+            { "opponent": { "id": 200, "name": "FaZe" }, "type": "Team" }
+          ]
+        }
+        """;
+
+        ExternalEsportsMatch match = PandaScoreMapper.MapMatch(json);
+
+        match.StartTime.Should().Be(DateTime.SpecifyKind(new DateTime(2026, 6, 10, 18, 0, 0), DateTimeKind.Utc));
+        match.EventStartTime.Should().Be(new DateTime(2026, 6, 11, 0, 0, 0));
+        match.EventEndTime.Should().Be(new DateTime(2026, 6, 12, 0, 0, 0));
+    }
+
+    [Fact]
     public void MapResult_已结束比赛_映射winner与比分()
     {
         const string json = """

@@ -96,9 +96,9 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             EnsureMySqlColumn("betting_matches", "pending_settlement",
                 "ALTER TABLE `betting_matches` ADD COLUMN `pending_settlement` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '结果已预填待管理员确认结算：0=否，1=是' AFTER `is_published`");
 
-            EnsureMySqlIndex("betting_events", "idx_events_external_id", "CREATE INDEX `idx_events_external_id` ON `betting_events` (`external_id`)");
+            EnsureMySqlUniqueIndex("betting_events", "idx_events_external_id", "CREATE UNIQUE INDEX `idx_events_external_id` ON `betting_events` (`external_id`)");
             EnsureMySqlIndex("betting_events", "idx_events_is_published", "CREATE INDEX `idx_events_is_published` ON `betting_events` (`is_published`)");
-            EnsureMySqlIndex("betting_matches", "idx_matches_external_id", "CREATE INDEX `idx_matches_external_id` ON `betting_matches` (`external_id`)");
+            EnsureMySqlUniqueIndex("betting_matches", "idx_matches_external_id", "CREATE UNIQUE INDEX `idx_matches_external_id` ON `betting_matches` (`external_id`)");
             EnsureMySqlIndex("betting_matches", "idx_matches_is_published", "CREATE INDEX `idx_matches_is_published` ON `betting_matches` (`is_published`)");
             EnsureMySqlIndex("betting_matches", "idx_matches_pending_settlement", "CREATE INDEX `idx_matches_pending_settlement` ON `betting_matches` (`pending_settlement`)");
         }
@@ -116,9 +116,9 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             EnsureSqliteColumn("betting_matches", "is_published", "ALTER TABLE `betting_matches` ADD COLUMN `is_published` INTEGER NOT NULL DEFAULT 1");
             EnsureSqliteColumn("betting_matches", "pending_settlement", "ALTER TABLE `betting_matches` ADD COLUMN `pending_settlement` INTEGER NOT NULL DEFAULT 0");
 
-            ExecuteSchemaStatement("CREATE INDEX IF NOT EXISTS `idx_events_external_id` ON `betting_events` (`external_id`)");
+            EnsureSqliteUniqueIndex("betting_events", "idx_events_external_id", "CREATE UNIQUE INDEX `idx_events_external_id` ON `betting_events` (`external_id`)");
             ExecuteSchemaStatement("CREATE INDEX IF NOT EXISTS `idx_events_is_published` ON `betting_events` (`is_published`)");
-            ExecuteSchemaStatement("CREATE INDEX IF NOT EXISTS `idx_matches_external_id` ON `betting_matches` (`external_id`)");
+            EnsureSqliteUniqueIndex("betting_matches", "idx_matches_external_id", "CREATE UNIQUE INDEX `idx_matches_external_id` ON `betting_matches` (`external_id`)");
             ExecuteSchemaStatement("CREATE INDEX IF NOT EXISTS `idx_matches_is_published` ON `betting_matches` (`is_published`)");
             ExecuteSchemaStatement("CREATE INDEX IF NOT EXISTS `idx_matches_pending_settlement` ON `betting_matches` (`pending_settlement`)");
         }
@@ -148,6 +148,16 @@ namespace CandyCottage.CandyBot.Services.SystemServices
                 FROM information_schema.statistics
                 WHERE table_schema = DATABASE() AND table_name = @table AND index_name = @index");
             return row is not null && Convert.ToInt32(row["c"]) > 0;
+        }
+
+        private bool MySqlUniqueIndexExists(string table, string index)
+        {
+            sql.Parameters["@table"] = table;
+            sql.Parameters["@index"] = index;
+            DataRow? row = sql.ExecuteDataRow(@"SELECT COUNT(*) AS c, COALESCE(MAX(non_unique), 1) AS non_unique
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE() AND table_name = @table AND index_name = @index");
+            return row is not null && Convert.ToInt32(row["c"]) > 0 && Convert.ToInt32(row["non_unique"]) == 0;
         }
 
         private bool SqliteTableExists(string table)
@@ -191,12 +201,31 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             }
         }
 
+        private void EnsureMySqlUniqueIndex(string table, string index, string statement)
+        {
+            if (MySqlUniqueIndexExists(table, index))
+            {
+                return;
+            }
+            if (MySqlIndexExists(table, index))
+            {
+                ExecuteSchemaStatement($"DROP INDEX `{index}` ON `{table}`");
+            }
+            ExecuteSchemaStatement(statement);
+        }
+
         private void EnsureSqliteColumn(string table, string column, string statement)
         {
             if (!SqliteColumnExists(table, column))
             {
                 ExecuteSchemaStatement(statement);
             }
+        }
+
+        private void EnsureSqliteUniqueIndex(string table, string index, string statement)
+        {
+            ExecuteSchemaStatement($"DROP INDEX IF EXISTS `{index}`");
+            ExecuteSchemaStatement(statement);
         }
 
         private void ExecuteSchemaStatement(string statement)

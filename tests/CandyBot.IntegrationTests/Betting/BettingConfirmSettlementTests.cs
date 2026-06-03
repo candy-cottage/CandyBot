@@ -21,10 +21,10 @@ public class BettingConfirmSettlementTests(MySqlFixture fixture)
     /// <paramref name="betDeadline"/> 默认在过去（比赛已截止、不可下注）；需要先下注的用例传一个未来时间。</summary>
     private long SeedMatch(BettingService service, DateTime? betDeadline = null)
     {
-        service.CreateEvent("测试赛事", DateTime.Now.AddDays(-1), DateTime.Now.AddDays(1), out _, out long? eventId)
+        service.CreateEvent("测试赛事", ChinaStandardTime.Now.AddDays(-1), ChinaStandardTime.Now.AddDays(1), out _, out long? eventId)
             .Should().BeTrue();
         service.CreateMatch((int)eventId!.Value, "NAVI", "FaZe", "小组赛",
-            DateTime.Now.AddHours(-2), betDeadline ?? DateTime.Now.AddHours(-3),
+            ChinaStandardTime.Now.AddHours(-2), betDeadline ?? ChinaStandardTime.Now.AddHours(-3),
             "team1_win,team2_win", 2m, 2m, null, true, out _, out long? matchId)
             .Should().BeTrue();
         return matchId!.Value;
@@ -58,8 +58,8 @@ public class BettingConfirmSettlementTests(MySqlFixture fixture)
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService service = new(sql, new CandyBotFunctionConfig());
-        service.CreateEvent("测试赛事", DateTime.Now.AddDays(-1), DateTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
-        service.CreateMatch((int)eventId!.Value, "NAVI", "FaZe", "小组赛", DateTime.Now.AddHours(-2), DateTime.Now.AddHours(-3),
+        service.CreateEvent("测试赛事", ChinaStandardTime.Now.AddDays(-1), ChinaStandardTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
+        service.CreateMatch((int)eventId!.Value, "NAVI", "FaZe", "小组赛", ChinaStandardTime.Now.AddHours(-2), ChinaStandardTime.Now.AddHours(-3),
             "team1_win,team2_win", 2m, 2m, null, true, out _, out long? matchId).Should().BeTrue();
         sql.Parameters["@mid"] = matchId!.Value;
         sql.Execute("UPDATE betting_matches SET result='2:1', winner=1, pending_settlement=1 WHERE id=@mid");
@@ -165,7 +165,7 @@ public class BettingConfirmSettlementTests(MySqlFixture fixture)
         const double initial = 50000;
         long uid = SeedUser("u-confirm-backstop", initial);
         // 截止时间放在未来，使下注开放；开始时间仍在过去（SeedMatch 固定），保证之后可结算。
-        long matchId = SeedMatch(service, betDeadline: DateTime.Now.AddDays(1));
+        long matchId = SeedMatch(service, betDeadline: ChinaStandardTime.Now.AddDays(1));
 
         const long bet = 1000;
         service.PlaceBet(uid, matchId, "team1", bet, out string be).Should().BeTrue(be);

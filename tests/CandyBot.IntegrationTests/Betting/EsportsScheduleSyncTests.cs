@@ -42,7 +42,7 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        DateTime start = DateTime.Now.AddDays(3);
+        DateTime start = DateTime.UtcNow.AddDays(3);
         EsportsSyncService service = new(
             NullLogger<EsportsSyncService>.Instance,
             sql,
@@ -67,7 +67,8 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        DateTime start = DateTime.Now.AddDays(3);
+        DateTime start = DateTime.UtcNow.AddDays(3);
+        DateTime beijingStart = ChinaStandardTime.FromUtc(start);
         EsportsSyncService service = new(
             NullLogger<EsportsSyncService>.Instance,
             sql,
@@ -83,20 +84,21 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
         Convert.ToInt32(row["status"]).Should().Be(0);
         Convert.ToInt32(row["betting_enabled"]).Should().Be(1);
         row["available_options"].ToString().Should().Contain("team1_win").And.Contain("team2_win");
-        Convert.ToDateTime(row["bet_deadline"]).Should().BeCloseTo(start, TimeSpan.FromSeconds(1));
+        Convert.ToDateTime(row["bet_deadline"]).Should().BeCloseTo(beijingStart, TimeSpan.FromSeconds(1));
         Convert.ToDecimal(row["team1_win_odds"]).Should().Be(1.85m);
         Convert.ToDecimal(row["team2_win_odds"]).Should().Be(1.85m);
     }
 
     [Fact]
-    public async Task SyncSchedulesAsync_UTC开赛时间在写库边界转为本地时间()
+    public async Task SyncSchedulesAsync_UTC开赛时间在写库边界转为北京时间()
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
 
-        // provider 产出的 StartTime 为 UTC（Kind=Utc）；写库边界应转为本地时间，
-        // 与系统其余按 DateTime.Now（本地）的截止/状态比较保持一致。
-        DateTime utcStart = DateTime.SpecifyKind(new DateTime(2026, 6, 10, 12, 0, 0), DateTimeKind.Utc);
+        // provider 产出的 StartTime 为 UTC（Kind=Utc）；写库边界统一转为北京时间，
+        // 避免部署服务器时区影响用户看到的赛程与赛事状态窗口。
+        DateTime utcStart = DateTime.SpecifyKind(new DateTime(2026, 6, 10, 18, 0, 0), DateTimeKind.Utc);
+        DateTime beijingStart = new(2026, 6, 11, 2, 0, 0);
         EsportsSyncService service = new(
             NullLogger<EsportsSyncService>.Instance,
             sql,
@@ -107,8 +109,8 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
         await service.SyncSchedulesAsync();
 
         DataRow? row = sql.ExecuteDataRow("SELECT start_time, bet_deadline FROM betting_matches WHERE external_id='match-utc'");
-        Convert.ToDateTime(row!["start_time"]).Should().BeCloseTo(utcStart.ToLocalTime(), TimeSpan.FromSeconds(1));
-        Convert.ToDateTime(row["bet_deadline"]).Should().BeCloseTo(utcStart.ToLocalTime(), TimeSpan.FromSeconds(1));
+        Convert.ToDateTime(row!["start_time"]).Should().BeCloseTo(beijingStart, TimeSpan.FromSeconds(1));
+        Convert.ToDateTime(row["bet_deadline"]).Should().BeCloseTo(beijingStart, TimeSpan.FromSeconds(1));
     }
 
     [Fact]
@@ -118,14 +120,14 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
         using MySQLHelper sql = _fixture.CreateHelper();
 
         // 预置一个已发布赛事（external_id 与 FakeProvider 的锚点一致），赛事 UPDATE 带 AND is_published=0，应被原样保留。
-        DateTime eventStart = DateTime.Now.AddDays(1);
+        DateTime eventStart = ChinaStandardTime.Now.AddDays(1);
         sql.Parameters["@start"] = eventStart;
         sql.Parameters["@end"] = eventStart.AddDays(7);
         sql.Execute("INSERT INTO betting_events (external_id, is_published, name, status, start_time, end_time) VALUES ('league:season:tournament', 1, '已发布赛事', 0, @start, @end)");
         long eventId = sql.LastInsertId;
 
         // 预置一个已发布、未开始的比赛，初始开赛/截止时间为 now+2d，并使用可辨识的队名以验证刷新分支不覆盖阵容。
-        DateTime initialStart = DateTime.Now.AddDays(2);
+        DateTime initialStart = ChinaStandardTime.Now.AddDays(2);
         sql.Parameters["@eid"] = eventId;
         sql.Parameters["@start"] = initialStart;
         sql.Parameters["@deadline"] = initialStart;
@@ -136,8 +138,8 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
              '[""team1_win"",""team2_win""]', 2.00, 2.00, '', 0, 1)");
         long matchId = sql.LastInsertId;
 
-        // 用更晚的开赛时间（now+5d）触发已发布分支 else if (match.StartTime > DateTime.Now)。
-        DateTime newStart = DateTime.Now.AddDays(5);
+        DateTime newStart = DateTime.UtcNow.AddDays(5);
+        DateTime newStartBeijing = ChinaStandardTime.FromUtc(newStart);
         EsportsSyncService service = new(
             NullLogger<EsportsSyncService>.Instance,
             sql,
@@ -149,8 +151,8 @@ public class EsportsScheduleSyncTests(MySqlFixture fixture)
 
         sql.Parameters["@mid"] = matchId;
         DataRow? match = sql.ExecuteDataRow("SELECT start_time, bet_deadline, is_published, status, team1_name, team2_name FROM betting_matches WHERE id=@mid");
-        Convert.ToDateTime(match!["start_time"]).Should().BeCloseTo(newStart, TimeSpan.FromSeconds(1));
-        Convert.ToDateTime(match["bet_deadline"]).Should().BeCloseTo(newStart, TimeSpan.FromSeconds(1));
+        Convert.ToDateTime(match!["start_time"]).Should().BeCloseTo(newStartBeijing, TimeSpan.FromSeconds(1));
+        Convert.ToDateTime(match["bet_deadline"]).Should().BeCloseTo(newStartBeijing, TimeSpan.FromSeconds(1));
         Convert.ToInt32(match["is_published"]).Should().Be(1);
         Convert.ToInt32(match["status"]).Should().Be(0);
         match["team1_name"].ToString().Should().Be("OldTeam1");

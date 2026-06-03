@@ -115,7 +115,7 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
         using MySQLHelper sql = _fixture.CreateHelper();
 
         RecordingBotReplySender sender = new();
-        FakeProvider provider = new([Match("match-now", DateTime.Now.AddDays(3))]);
+        FakeProvider provider = new([Match("match-now", DateTime.UtcNow.AddDays(3))]);
         CandyBotFunctionConfig cfg = new() { System = true, Betting = true, BettingAutomation = true };
         CandyBotService service = BuildService(sql, cfg, sender, provider);
 

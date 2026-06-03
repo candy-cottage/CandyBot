@@ -19,8 +19,8 @@ public class BettingVisibilityTests(MySqlFixture fixture)
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService service = new(sql, new CandyBotFunctionConfig());
 
-        service.CreateEvent("已发布赛事", DateTime.Now.AddDays(1), DateTime.Now.AddDays(2), out _, out long? visibleEventId).Should().BeTrue();
-        service.CreateMatch((int)visibleEventId!.Value, "A", "B", "小组赛", DateTime.Now.AddDays(1), DateTime.Now.AddDays(1), "team1_win,team2_win", null, null, null, true, out _, out long? visibleMatchId).Should().BeTrue();
+        service.CreateEvent("已发布赛事", ChinaStandardTime.Now.AddDays(1), ChinaStandardTime.Now.AddDays(2), out _, out long? visibleEventId).Should().BeTrue();
+        service.CreateMatch((int)visibleEventId!.Value, "A", "B", "小组赛", ChinaStandardTime.Now.AddDays(1), ChinaStandardTime.Now.AddDays(1), "team1_win,team2_win", null, null, null, true, out _, out long? visibleMatchId).Should().BeTrue();
 
         sql.Execute("INSERT INTO betting_events (external_id, is_published, name, status, start_time, end_time) VALUES ('evt-hidden', 0, '草稿赛事', 0, NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY))");
         long hiddenEventId = sql.LastInsertId;

@@ -99,8 +99,8 @@ ALTER TABLE `betting_matches`
     ADD COLUMN `is_published` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否对用户可见：0=草稿，1=已发布' AFTER `external_id`,
     ADD COLUMN `pending_settlement` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '结果已预填待管理员确认结算：0=否，1=是' AFTER `is_published`;
 
-CREATE INDEX `idx_events_external_id` ON `betting_events` (`external_id`);
+CREATE UNIQUE INDEX `idx_events_external_id` ON `betting_events` (`external_id`);
 CREATE INDEX `idx_events_is_published` ON `betting_events` (`is_published`);
-CREATE INDEX `idx_matches_external_id` ON `betting_matches` (`external_id`);
+CREATE UNIQUE INDEX `idx_matches_external_id` ON `betting_matches` (`external_id`);
 CREATE INDEX `idx_matches_is_published` ON `betting_matches` (`is_published`);
 CREATE INDEX `idx_matches_pending_settlement` ON `betting_matches` (`pending_settlement`);

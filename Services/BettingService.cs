@@ -118,7 +118,7 @@ namespace CandyCottage.CandyBot.Services
                     string mStatusStr = mstatus switch { 0 => "未开始", 1 => "进行中", 2 => "已结束", 3 => "已取消", _ => "未知" };
                     string matchLabel = $"{t1} vs {t2}";
                     string clickableMatch = matchLabel.CreateCmdInput($"比赛详情 {mid}");
-                    string ddl = deadline > DateTime.Now && mstatus == 0 && bettingEnabled ? $"截止：{deadline:MM-dd HH:mm}" : $"开赛：{startTime:MM-dd HH:mm}";
+                    string ddl = deadline > ChinaStandardTime.Now && mstatus == 0 && bettingEnabled ? $"截止：{deadline:MM-dd HH:mm}" : $"开赛：{startTime:MM-dd HH:mm}";
                     matches.AppendLine($"  [{mid}] {(stage != "" ? $"{stage} " : "")} {clickableMatch} (状态：{mStatusStr}{(result.Trim() != "" ? $" | 结果：{result}" : "")} | {ddl})");
                 }
             }
@@ -393,7 +393,7 @@ namespace CandyCottage.CandyBot.Services
                     sb.AppendLine($"> 📝 {description}\r\n");
                 }
 
-                DateTime now = DateTime.Now;
+                DateTime now = ChinaStandardTime.Now;
                 bool canBet = (status == 0 || status == 1) && now < deadline && bettingEnabled;
                 if (!functionConfig.Betting_ReadOnly)
                 {
@@ -516,7 +516,7 @@ namespace CandyCottage.CandyBot.Services
                     error = "该比赛不开放预测。";
                     return false;
                 }
-                if (status == 2 || DateTime.Now > deadline)
+                if (status == 2 || ChinaStandardTime.Now > deadline)
                 {
                     error = "该比赛处于不可预测阶段。";
                     return false;
@@ -578,7 +578,7 @@ namespace CandyCottage.CandyBot.Services
                 sql.Parameters["@oval"] = optionValue;
                 sql.Parameters["@amt"] = amount;
                 sql.Parameters["@odds"] = oddsAtBet;
-                sql.Parameters["@time"] = DateTime.Now;
+                sql.Parameters["@time"] = ChinaStandardTime.Now;
                 sql.Execute("INSERT INTO betting_bet_records (user_id, match_id, option_type, option_value, amount, odds_at_bet, bet_time) VALUES (@uid, @mid, @otype, @oval, @amt, @odds, @time)");
                 if (!sql.Success)
                 {
@@ -895,7 +895,7 @@ namespace CandyCottage.CandyBot.Services
         /// </summary>
         private void UpdateStatuses()
         {
-            DateTime now = DateTime.Now;
+            DateTime now = ChinaStandardTime.Now;
 
             // 更新赛事状态：0→1 (进行中)，1→2 (已结束)
             sql.Parameters["@now"] = now;

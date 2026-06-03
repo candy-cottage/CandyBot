@@ -31,7 +31,7 @@ public class EsportsResultSyncTests(MySqlFixture fixture)
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService betting = new(sql, new CandyBotFunctionConfig());
-        betting.CreateEvent("测试赛事", DateTime.Now.AddDays(-1), DateTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
+        betting.CreateEvent("测试赛事", ChinaStandardTime.Now.AddDays(-1), ChinaStandardTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
         sql.Parameters["@eid"] = eventId!.Value;
         sql.Execute(@"INSERT INTO betting_matches (external_id, is_published, pending_settlement, event_id, team1_name, team2_name, stage, status, start_time, bet_deadline, available_options, team1_win_odds, team2_win_odds, description, betting_enabled)
             VALUES ('match-1', 1, 0, @eid, 'NAVI', 'FaZe', '小组赛', 1, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 3 HOUR), '[""team1_win"",""team2_win""]', 1.85, 1.85, '', 1)");
@@ -58,7 +58,7 @@ public class EsportsResultSyncTests(MySqlFixture fixture)
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService betting = new(sql, new CandyBotFunctionConfig());
-        betting.CreateEvent("测试赛事", DateTime.Now.AddDays(-1), DateTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
+        betting.CreateEvent("测试赛事", ChinaStandardTime.Now.AddDays(-1), ChinaStandardTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
         sql.Parameters["@eid"] = eventId!.Value;
         // 含 score 选项的比赛无法仅凭 winner 自动判定，必须归入待人工结算而非预填。
         sql.Execute(@"INSERT INTO betting_matches (external_id, is_published, pending_settlement, event_id, team1_name, team2_name, stage, status, start_time, bet_deadline, available_options, team1_win_odds, team2_win_odds, description, betting_enabled)
@@ -87,7 +87,7 @@ public class EsportsResultSyncTests(MySqlFixture fixture)
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService betting = new(sql, new CandyBotFunctionConfig());
-        betting.CreateEvent("测试赛事", DateTime.Now.AddDays(-1), DateTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
+        betting.CreateEvent("测试赛事", ChinaStandardTime.Now.AddDays(-1), ChinaStandardTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
         sql.Parameters["@eid"] = eventId!.Value;
         sql.Execute(@"INSERT INTO betting_matches (external_id, is_published, pending_settlement, event_id, team1_name, team2_name, stage, status, start_time, bet_deadline, available_options, team1_win_odds, team2_win_odds, description, betting_enabled)
             VALUES ('match-idem', 1, 0, @eid, 'NAVI', 'FaZe', '小组赛', 1, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 3 HOUR), '[""team1_win"",""team2_win""]', 1.85, 1.85, '', 1)");
@@ -118,7 +118,7 @@ public class EsportsResultSyncTests(MySqlFixture fixture)
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
         BettingService betting = new(sql, new CandyBotFunctionConfig());
-        betting.CreateEvent("测试赛事", DateTime.Now.AddDays(-1), DateTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
+        betting.CreateEvent("测试赛事", ChinaStandardTime.Now.AddDays(-1), ChinaStandardTime.Now.AddDays(1), out _, out long? eventId).Should().BeTrue();
         sql.Parameters["@eid"] = eventId!.Value;
         sql.Execute(@"INSERT INTO betting_matches (external_id, is_published, pending_settlement, event_id, team1_name, team2_name, stage, status, start_time, bet_deadline, available_options, team1_win_odds, team2_win_odds, description, betting_enabled)
             VALUES ('match-canceled', 1, 0, @eid, 'NAVI', 'FaZe', '小组赛', 3, DATE_SUB(NOW(), INTERVAL 2 HOUR), DATE_SUB(NOW(), INTERVAL 3 HOUR), '[""team1_win"",""team2_win""]', 1.85, 1.85, '', 0)");

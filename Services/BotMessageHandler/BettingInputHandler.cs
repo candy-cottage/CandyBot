@@ -1,4 +1,5 @@
 ﻿using CandyCottage.CandyBot.Models;
+using CandyCottage.CandyBot.Utilities;
 using Milimoe.FunGame.Core.Entity;
 using Milimoe.FunGame.Core.Library.Constant;
 using ProjectRedbud.FunGame.SQLQueryExtension;
@@ -899,7 +900,7 @@ public partial class CandyBotService
             DateTime newStart = oldStart.AddMinutes(-minutes);
             DateTime newDeadline = oldDeadline.AddMinutes(-minutes);
 
-            if (newDeadline < DateTime.Now)
+            if (newDeadline < ChinaStandardTime.Now)
             {
                 md.Content = $"⚠️ 注意：提前后截止时间为 {newDeadline:yyyy-MM-dd HH:mm}，已经早于当前时间，预测将立即锁定。\n";
             }
