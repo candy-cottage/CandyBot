@@ -217,7 +217,7 @@ namespace CandyCottage.CandyBot.Models
         public string Id { get; set; } = "";
 
         [JsonPropertyName("timestamp")]
-        public long Timestamp { get; set; }
+        public string Timestamp { get; set; } = "";
     }
 
     public class AccessTokenResponse
