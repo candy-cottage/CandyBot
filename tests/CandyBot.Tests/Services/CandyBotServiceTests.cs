@@ -7,7 +7,6 @@ using FluentAssertions;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Milimoe.FunGame.Core.Api.Transmittal;
-using Milimoe.FunGame.Core.Entity;
 using NSubstitute;
 using Xunit;
 
@@ -27,7 +26,7 @@ public class CandyBotServiceTests
         IBotReplySender botService,
         CandyBotFunctionConfig? functionConfig = null,
         IMemoryCache? memoryCache = null,
-        Milimoe.FunGame.Core.Api.Transmittal.SQLHelper sql = null!,
+        SQLHelper sql = null!,
         BettingService bettingService = null!,
         IForzaSheetImporter forzaSheetImporter = null!) =>
         new(
@@ -35,7 +34,10 @@ public class CandyBotServiceTests
             memoryCache!,
             sql,
             functionConfig!,
+            forzaConfig: null!,
+            candyBotConfig: null!,
             taskQueue: null!,
+            taskManager: null!,
             botService,
             bettingService,
             sqlInitService: null!,

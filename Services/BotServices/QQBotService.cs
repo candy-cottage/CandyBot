@@ -55,22 +55,22 @@ namespace CandyCottage.CandyBot.Services.BotServices
             return await UploadMediaAsync($"/v2/groups/{groupOpenid}/files", fileType, url);
         }
 
-        public async Task SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)
+        public async Task<SendMessageResult?> SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)
         {
             if (msg is ConsoleInputMessage)
             {
                 if (Logger.IsEnabled(LogLevel.Information)) Logger.LogInformation("Handle Console Input: {Detail} => {Content}", msg.Detail, reply.Markdown?.Content);
-                return;
+                return null;
             }
             if (reply.Markdown != null && !string.IsNullOrWhiteSpace(reply.Markdown.Content))
             {
                 // 发送 Markdown + 键盘
-                await SendMarkdownAsync(msg, reply.Markdown, reply.Keyboard, msgSeq);
+                return await SendMarkdownAsync(msg, reply.Markdown, reply.Keyboard, msgSeq);
             }
             else if (reply.Keyboard != null)
             {
                 // 发送 文本 + 键盘
-                await SendMarkdownAsync(msg, new()
+                return await SendMarkdownAsync(msg, new()
                 {
                     Content = reply.Text
                 }, reply.Keyboard, msgSeq);
@@ -78,57 +78,70 @@ namespace CandyCottage.CandyBot.Services.BotServices
             else if (!string.IsNullOrWhiteSpace(reply.Text))
             {
                 // 发送纯文本
-                await SendTextAsync(msg, reply.Text, msgSeq: msgSeq);
+                return await SendTextAsync(msg, reply.Text, msgSeq: msgSeq);
             }
+            return null;
         }
 
-        public async Task SendTextAsync(IBotMessage msg, string content, int msgType = 0, object? media = null, int? msgSeq = null)
+        public async Task<SendMessageResult?> SendTextAsync(IBotMessage msg, string content, int msgType = 0, object? media = null, int? msgSeq = null)
         {
             if (msg.IsGroup)
             {
                 content = "\r\n" + content.Trim();
-                await SendGroupMessageAsync(msg.OpenId, content, msgType, media, msg.SendProactive ? null : msg.Id, msgSeq);
+                return await SendGroupMessageAsync(msg.OpenId, content, msgType, media, msg.SendProactive ? null : msg.Id, msgSeq);
             }
             else
             {
                 content = content.Trim();
-                await SendC2CMessageAsync(msg.OpenId, content, msgType, media, msg.SendProactive ? null : msg.Id, msgSeq);
+                return await SendC2CMessageAsync(msg.OpenId, content, msgType, media, msg.SendProactive ? null : msg.Id, msgSeq);
             }
         }
 
-        public async Task SendMarkdownAsync(IBotMessage msg, MarkdownMessage mdMsg, KeyboardMessage? kbMsg = null, int? msgSeq = null)
+        public async Task<SendMessageResult?> SendMarkdownAsync(IBotMessage msg, MarkdownMessage mdMsg, KeyboardMessage? kbMsg = null, int? msgSeq = null)
         {
             if (msg.IsGroup)
             {
-                await SendGroupMarkdownAsync(msg.OpenId, mdMsg, kbMsg, msg.SendProactive ? null : msg.Id, msgSeq);
+                return await SendGroupMarkdownAsync(msg.OpenId, mdMsg, kbMsg, msg.SendProactive ? null : msg.Id, msgSeq);
             }
             else
             {
-                await SendC2CMarkdownAsync(msg.OpenId, mdMsg, kbMsg, msg.SendProactive ? null : msg.Id, msgSeq);
+                return await SendC2CMarkdownAsync(msg.OpenId, mdMsg, kbMsg, msg.SendProactive ? null : msg.Id, msgSeq);
             }
         }
 
-        private async Task SendC2CMessageAsync(string openid, string content, int msgType = 0, object? media = null, string? msgId = null, int? msgSeq = null)
+        public async Task<bool> RecallMessageAsync(IBotMessage msg, bool hideTip = false)
         {
-            await SendMessageAsync($"/v2/users/{openid}/messages", content, msgType, media, msgId, msgSeq);
+            if (msg.IsGroup)
+            {
+                return await RecallGroupMessageAsync(msg.OpenId, msg.Id, hideTip);
+            }
+            else
+            {
+                return await RecallC2CMessageAsync(msg.OpenId, msg.Id, hideTip);
+            }
         }
 
-        private async Task SendGroupMessageAsync(string groupOpenid, string content, int msgType = 0, object? media = null, string? msgId = null, int? msgSeq = null)
+        private async Task<SendMessageResult?> SendC2CMessageAsync(string openid, string content, int msgType = 0, object? media = null, string? msgId = null, int? msgSeq = null)
         {
-            await SendMessageAsync($"/v2/groups/{groupOpenid}/messages", content, msgType, media, msgId, msgSeq);
+            return await SendMessageAsync($"/v2/users/{openid}/messages", content, msgType, media, msgId, msgSeq);
         }
 
-        private async Task SendC2CMarkdownAsync(string openid, MarkdownMessage markdown, KeyboardMessage? keyboard = null, string? msgId = null, int? msgSeq = null)
+        private async Task<SendMessageResult?> SendGroupMessageAsync(string groupOpenid, string content, int msgType = 0, object? media = null, string? msgId = null, int? msgSeq = null)
         {
-            await SendMarkdownMessageAsync($"/v2/users/{openid}/messages", markdown, keyboard, msgId, msgSeq);
+            return await SendMessageAsync($"/v2/groups/{groupOpenid}/messages", content, msgType, media, msgId, msgSeq);
         }
 
-        private async Task SendGroupMarkdownAsync(string groupOpenid, MarkdownMessage markdown, KeyboardMessage? keyboard = null, string? msgId = null, int? msgSeq = null)
+        private async Task<SendMessageResult?> SendC2CMarkdownAsync(string openid, MarkdownMessage markdown, KeyboardMessage? keyboard = null, string? msgId = null, int? msgSeq = null)
         {
-            await SendMarkdownMessageAsync($"/v2/groups/{groupOpenid}/messages", markdown, keyboard, msgId, msgSeq);
+            return await SendMarkdownMessageAsync($"/v2/users/{openid}/messages", markdown, keyboard, msgId, msgSeq);
         }
 
-        private async Task SendMessageAsync(string url, string content, int msgType = 0, object? media = null, string? msgId = null, int? msgSeq = null)
+        private async Task<SendMessageResult?> SendGroupMarkdownAsync(string groupOpenid, MarkdownMessage markdown, KeyboardMessage? keyboard = null, string? msgId = null, int? msgSeq = null)
+        {
+            return await SendMarkdownMessageAsync($"/v2/groups/{groupOpenid}/messages", markdown, keyboard, msgId, msgSeq);
+        }
+
+        private async Task<SendMessageResult?> SendMessageAsync(string url, string content, int msgType = 0, object? media = null, string? msgId = null, int? msgSeq = null)
         {
             string accessToken = await GetAccessTokenAsync();
             HttpRequestMessage request = new(HttpMethod.Post, $"https://api.sgroup.qq.com{url}");
@@ -154,14 +167,25 @@ namespace CandyCottage.CandyBot.Services.BotServices
             request.Content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
 
             HttpResponseMessage response = await HttpClient.SendAsync(request);
+            string responseBody = await response.Content.ReadAsStringAsync();
+
             if (!response.IsSuccessStatusCode)
             {
-                string errorBody = await response.Content.ReadAsStringAsync();
-                if (Logger.IsEnabled(LogLevel.Error)) Logger.LogError("状态码：{response.StatusCode}，错误信息：{errorBody}", response.StatusCode, errorBody);
+                if (Logger.IsEnabled(LogLevel.Error)) Logger.LogError("状态码：{response.StatusCode}，错误信息：{responseBody}", response.StatusCode, responseBody);
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<SendMessageResult>(responseBody);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "解析消息发送返回值失败，原始响应：{ResponseBody}", responseBody);
+                return null;
             }
         }
 
-        private async Task SendMarkdownMessageAsync(string url, MarkdownMessage markdown, KeyboardMessage? keyboard = null, string? msgId = null, int? msgSeq = null)
+        private async Task<SendMessageResult?> SendMarkdownMessageAsync(string url, MarkdownMessage markdown, KeyboardMessage? keyboard = null, string? msgId = null, int? msgSeq = null)
         {
             string accessToken = await GetAccessTokenAsync();
             HttpRequestMessage request = new(HttpMethod.Post, $"https://api.sgroup.qq.com{url}");
@@ -177,10 +201,21 @@ namespace CandyCottage.CandyBot.Services.BotServices
             request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
             HttpResponseMessage response = await HttpClient.SendAsync(request);
+            string responseBody = await response.Content.ReadAsStringAsync();
+
             if (!response.IsSuccessStatusCode)
             {
-                string errorBody = await response.Content.ReadAsStringAsync();
-                if (Logger.IsEnabled(LogLevel.Error)) Logger.LogError("状态码：{response.StatusCode}，错误信息：{errorBody}", response.StatusCode, errorBody);
+                if (Logger.IsEnabled(LogLevel.Error)) Logger.LogError("状态码：{response.StatusCode}，错误信息：{responseBody}", response.StatusCode, responseBody);
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<SendMessageResult>(responseBody);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "解析消息发送返回值失败，原始响应：{ResponseBody}", responseBody);
+                return null;
             }
         }
 
@@ -222,6 +257,42 @@ namespace CandyCottage.CandyBot.Services.BotServices
                 FileInfo = mediaResponse.FileInfo,
                 Ttl = mediaResponse.Ttl
             };
+        }
+
+        private async Task<bool> RecallC2CMessageAsync(string openid, string messageId, bool hideTip = false)
+        {
+            string url = $"/v2/users/{openid}/messages/{messageId}?hidetip={hideTip.ToString().ToLower()}";
+            return await RecallMessageInternalAsync(url);
+        }
+
+        private async Task<bool> RecallGroupMessageAsync(string groupOpenid, string messageId, bool hideTip = false)
+        {
+            string url = $"/v2/groups/{groupOpenid}/messages/{messageId}?hidetip={hideTip.ToString().ToLower()}";
+            return await RecallMessageInternalAsync(url);
+        }
+
+        private async Task<bool> RecallMessageInternalAsync(string relativeUrl)
+        {
+            string accessToken = await GetAccessTokenAsync();
+            HttpRequestMessage request = new(HttpMethod.Delete, $"https://api.sgroup.qq.com{relativeUrl}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("QQBot", accessToken);
+
+            HttpResponseMessage response = await HttpClient.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                // 成功时状态码通常为 204 No Content
+                if (Logger.IsEnabled(LogLevel.Debug))
+                    Logger.LogDebug("消息撤回成功，URL: {Url}", relativeUrl);
+                return true;
+            }
+            else
+            {
+                string errorBody = await response.Content.ReadAsStringAsync();
+                if (Logger.IsEnabled(LogLevel.Error))
+                    Logger.LogError("撤回消息失败，状态码：{StatusCode}，错误信息：{ErrorBody}，URL：{Url}",
+                        response.StatusCode, errorBody, relativeUrl);
+                return false;
+            }
         }
     }
 }

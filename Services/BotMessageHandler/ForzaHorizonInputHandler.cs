@@ -76,33 +76,52 @@ public partial class CandyBotService
             if (e.Detail.StartsWith("查车"))
             {
                 string detail = e.Detail["查车".Length..].Trim();
-                string[] parts = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 1)
-                {
-                    int page = 1;
-                    string name = parts[0];
-                    if (parts.Length > 1 && int.TryParse(parts[1], out int p)) page = p;
-
-                    (bool result, string msg) = forzaService.GetVehicleInfo(name, page, out int totalPages);
-                    if (result) md.Content = $"🏎 查询结果（{page} / {totalPages} 页）\r\n{msg}";
-                    else md.Content = msg;
-
-                    reply.Keyboard = new();
-                    if (totalPages > 1)
-                    {
-                        reply.Keyboard.AddPaginationRow($"查车 {name} ", page, totalPages);
-                    }
-                }
-                else
-                {
-                    md.Content = "格式：查车 <车名>\r\n支持模糊查询。";
-                    reply.Keyboard = new();
-                }
                 List<Button> buttons = [
                     Button.CreateCmdButton("🏎 查车", "查车", false),
                     Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
                     Button.CreateCmdButton("📊 查等级", "查等级", false),
                 ];
+                reply.Keyboard = new KeyboardMessage();
+
+                // 分离页码（最后一个 token 是数字）
+                string[] tokens = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                int page = 1;
+                string queryStr = detail;
+                if (tokens.Length > 0 && int.TryParse(tokens[^1], out int lastNum))
+                {
+                    page = lastNum;
+                    queryStr = string.Join(" ", tokens.Take(tokens.Length - 1)).Trim();
+                }
+
+                if (string.IsNullOrEmpty(queryStr))
+                {
+                    md.Content = "格式：查车 <制造商/型号> [页码]\r\n" +
+                        "示例：查车 法拉利\r\n" +
+                        "示例：查车 FXX\r\n" +
+                        "示例：查车 法拉利FXX\r\n" +
+                        "支持模糊查询，如：查车 FX。";
+                    reply.Keyboard.AppendButtonsWithNewRow(3, buttons);
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                var (manufacturer, model) = ParseManufacturerModel(queryStr);
+                // 如果没有匹配到制造商，则将整个字符串作为型号查询
+                bool useOr = manufacturer == null;
+                if (useOr)
+                {
+                    manufacturer = queryStr;
+                    model = queryStr;
+                }
+
+                // 调用服务查询
+                (bool result, string msg) = forzaService.GetVehicleInfo(manufacturer, model, useOr, page, out int totalPages);
+                if (result) md.Content = $"🏎 查询结果（{page} / {totalPages} 页）\r\n{msg}";
+                else md.Content = msg;
+                if (totalPages > 1)
+                {
+                    reply.Keyboard.AddPaginationRow($"查车 {queryStr} ", page, totalPages);
+                }
                 reply.Keyboard.AppendButtonsWithNewRow(3, buttons);
                 await botService.SendAsync(e, reply);
                 return true;
@@ -111,38 +130,7 @@ public partial class CandyBotService
             if (e.Detail.StartsWith("查等级"))
             {
                 string detail = e.Detail["查等级".Length..].Trim();
-                string[] parts = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-                string? classInput = null;
-                string? matchTypeInput = null;
-                bool selectOr = true;
-
-                int page = 1;
-                if (parts.Length == 1)
-                {
-                    classInput = parts[0];
-                    matchTypeInput = parts[0];
-                }
-                else if (parts.Length > 1)
-                {
-                    classInput = parts[0];
-                    if (int.TryParse(parts[1], out int p))
-                    {
-                        page = p;
-                        selectOr = true;
-                    }
-                    else
-                    {
-                        matchTypeInput = parts[1];
-                        if (parts.Length > 2 && int.TryParse(parts[2], out p))
-                        {
-                            page = p;
-                        }
-                        selectOr = false;
-                    }
-                }
-
-                if (classInput == null && matchTypeInput == null)
+                if (detail == "")
                 {
                     md.Content = "格式：查等级 <[等级]|[比赛类型]/[等级] [比赛类型]>\r\n" +
                                  "示例：查等级 S1 公路\r\n" +
@@ -157,12 +145,48 @@ public partial class CandyBotService
                     return true;
                 }
 
-                (bool result, string msg) = selectOr ? forzaService.GetVehiclesByClassOrMatchType(classInput, matchTypeInput, page, out int totalPages) : forzaService.GetVehiclesByClassAndMatchType(classInput, matchTypeInput, page, out totalPages);
+                // ----- 智能解析参数 -----
+                string[] tokens = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                int page = 1;
+                string paramStr = detail;
+
+                // 如果最后一个 token 是数字，则视为页码
+                if (tokens.Length > 0 && int.TryParse(tokens[^1], out int lastNum))
+                {
+                    page = lastNum;
+                    paramStr = string.Join(" ", tokens.Take(tokens.Length - 1));
+                }
+
+                string? classInput = null;
+                string? matchTypeInput = null;
+                bool useAndCondition = false; // true: AND, false: OR
+
+                if (paramStr.Contains(' '))
+                {
+                    // 带空格：按顺序取第一个词为等级，第二个词为比赛类型（允许只填一个）
+                    string[] parts = paramStr.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    classInput = parts[0];
+                    if (parts.Length > 1)
+                        matchTypeInput = parts[1];
+                    useAndCondition = matchTypeInput != null;
+                }
+                else
+                {
+                    // 无空格：尝试拆分为「等级+比赛类型」或纯等级
+                    (string? cls, string? match) = SplitClassAndMatchType(paramStr);
+                    classInput = cls;
+                    matchTypeInput = match;
+                    useAndCondition = matchTypeInput != null;
+                }
+
+                // 执行查询
+                (bool result, string msg) = useAndCondition ? forzaService.GetVehiclesByClassAndMatchType(classInput, matchTypeInput, page, out int totalPages) : forzaService.GetVehiclesByClassOrMatchType(classInput, matchTypeInput, page, out totalPages);
+
                 if (result) md.Content = $"🏎 查询结果（{page} / {totalPages} 页）\r\n{msg}";
-                else md.Content = msg;
+                else md.Content = $"{msg.Trim()}\r\n{md.Content}";
 
                 // 构建分页指令基础字符串
-                string baseCmd = selectOr ? $"查等级 {classInput ?? ""}".Trim() : $"查等级 {classInput ?? ""} {matchTypeInput ?? ""}".Trim();
+                string baseCmd = !useAndCondition ? $"查等级 {classInput ?? ""}".Trim() : $"查等级 {classInput ?? ""} {matchTypeInput ?? ""}".Trim();
                 reply.Keyboard = new KeyboardMessage();
                 if (totalPages > 1)
                 {
@@ -505,5 +529,56 @@ public partial class CandyBotService
             }
         }
         return true;
+    }
+
+    private static (string? classPart, string? matchTypePart) SplitClassAndMatchType(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return (null, null);
+
+        // 匹配以字母开头，后跟零个或多个数字的等级模式（如 S1, A, B, S2）
+        System.Text.RegularExpressions.Match match = MatchClassAndMatchType().Match(input);
+        if (match.Success)
+        {
+            string classPart = match.Groups[1].Value;
+            string rest = match.Groups[2].Value;
+            if (string.IsNullOrEmpty(rest))
+                return (classPart, null);
+            else
+                return (classPart, rest);
+        }
+        return (null, null);
+    }
+
+    private (string? manufacturer, string? model) ParseManufacturerModel(string input)
+    {
+        IReadOnlyList<string> manufacturers = forzaConfig.Manufacturers;
+
+        // 优先尝试最长匹配（按长度降序排序）
+        List<string> sorted = [.. manufacturers.OrderByDescending(m => m.Length)];
+        string? matchedManufacturer = null;
+        string? remaining = null;
+
+        foreach (string m in sorted)
+        {
+            // 忽略大小写，且要求制造商关键词必须作为子串出现在输入中
+            if (input.Contains(m, StringComparison.OrdinalIgnoreCase))
+            {
+                matchedManufacturer = m;
+
+                // 移除制造商部分，得到剩余字符串（注意处理大小写）
+                int index = input.IndexOf(m, StringComparison.OrdinalIgnoreCase);
+                remaining = input.Remove(index, m.Length).Trim();
+
+                // 如果剩余部分为空，则型号为 null
+                if (string.IsNullOrEmpty(remaining))
+                {
+                    remaining = null;
+                }
+                break;
+            }
+        }
+
+        return (matchedManufacturer, remaining);
     }
 }

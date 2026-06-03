@@ -26,7 +26,9 @@ namespace CandyCottage.CandyBot.Services
             sql.ClearParametersAfterExecute = false;
             sql.ExecuteDataSet(query);
             sql.ClearParametersAfterExecute = true;
-            if (!sql.Success) return (false, "查询失败，请稍后重试。", null, 0);
+
+            if (sql.DataSet is null || sql.DataSet.Tables.Count == 0 || sql.DataSet.Tables[0].Rows.Count == 0)
+                return (false, whereClause.Contains("LIKE") ? "未找到相关车辆。" : "未找到符合条件的车辆。", null, 0);
 
             DataTable dt = sql.DataSet.Tables[0];
 
@@ -77,16 +79,21 @@ namespace CandyCottage.CandyBot.Services
             return (success, message, data, totalPages);
         }
 
-        public (bool, string) GetVehicleInfo(string vehicleName, int page, out int totalPages)
+        public (bool, string) GetVehicleInfo(string? manufacturer, string? model, bool useOr, int page, out int totalPages)
         {
-            totalPages = page;
-            if (string.IsNullOrWhiteSpace(vehicleName))
-                return (false, "请提供车辆名称关键字（制造商或型号）。");
+            List<string> conditions = [];
+            if (!string.IsNullOrEmpty(manufacturer))
+            {
+                sql.Parameters["@manufacturer"] = $"%{EscapeLikeWildcards(manufacturer)}%";
+                conditions.Add("Manufacturer LIKE @manufacturer");
+            }
+            if (!string.IsNullOrEmpty(model))
+            {
+                sql.Parameters["@model"] = $"%{EscapeLikeWildcards(model)}%";
+                conditions.Add("Model LIKE @model");
+            }
 
-            string searchPattern = $"%{EscapeLikeWildcards(vehicleName)}%";
-            sql.Parameters["@search"] = searchPattern;
-            string whereClause = "WHERE Manufacturer LIKE @search OR Model LIKE @search";
-
+            string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(useOr ? " OR " : " AND ", conditions);
             return ExecuteVehicleQuery(whereClause, page, out totalPages);
         }
 
@@ -393,10 +400,10 @@ namespace CandyCottage.CandyBot.Services
         // 取数/计数/分页逻辑只此一处（GetVehicleDataTable），此方法只负责"空结果文案 + 呈现"。
         private (bool, string) ExecuteVehicleQuery(string whereClause, int page, out int totalPages)
         {
-            var (success, _, data, pages) = GetVehicleDataTable(whereClause, page);
+            var (success, msg, data, pages) = GetVehicleDataTable(whereClause, page);
             totalPages = pages;
             if (!success || data == null)
-                return (false, "查询失败，请稍后重试。");
+                return (false, msg);
 
             if (data.Rows.Count == 0)
                 return (false, whereClause.Contains("LIKE") ? "未找到相关车辆。" : "未找到符合条件的车辆。");

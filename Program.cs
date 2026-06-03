@@ -49,6 +49,8 @@ builder.Services.AddSingleton<ItemModule>();
 builder.Services.AddSingleton<SkillModule>();
 builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
 builder.Services.AddHostedService<QueuedHostedService>();
+builder.Services.AddSingleton<ITaskSchedulerManager, TaskSchedulerManager>();
+builder.Services.AddHostedService<TaskSchedulerService>();
 builder.Services.AddHostedService<SystemInitializeService>();
 builder.Services.AddScoped<MySQLHelper>();
 builder.Services.AddScoped<SQLiteHelper>();
