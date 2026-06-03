@@ -82,7 +82,8 @@ public class BettingDraftPublishTests(MySqlFixture fixture)
             sqlInitService: null!,
             userService: null!,
             forzaService: null!,
-            forzaSheetImporter: null!);
+            forzaSheetImporter: null!,
+            esportsSyncService: null!);
 
         bool handled = await service.HandleBettingInput(new C2CMessage { Detail = "待发布", Author = new() { Id = "admin" } }, AdminUser());
 

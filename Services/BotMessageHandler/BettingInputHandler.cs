@@ -50,6 +50,26 @@ public partial class CandyBotService
             return true;
         }
 
+        // 立即同步：管理员手动触发一次赛程抓取 + 结果预填（受赛事自动化开关控制）
+        if (e.Detail == "立即同步")
+        {
+            if (!await CheckUser(e, user, false)) return true;
+            if (!WillGoOn(functionConfig.BettingAutomation, user))
+            {
+                await botService.SendAsync(e, "赛事自动化正在维护，请稍后再试。");
+                return true;
+            }
+
+            EsportsScheduleSyncReport schedules = await esportsSyncService.SyncSchedulesAsync();
+            EsportsResultSyncReport results = await esportsSyncService.SyncResultsAsync();
+            md.Content = $"同步完成：抓取 {schedules.Fetched} 场，新增草稿 {schedules.MatchesCreated} 场，更新 {schedules.MatchesUpdated} 场；结果检查 {results.Checked} 场，待确认 {results.PendingSettlementCreated} 场。";
+            reply.Keyboard = new KeyboardMessage().AppendButtons(2,
+                Button.CreateCmdButton("📋 待发布", "待发布"),
+                Button.CreateCmdButton("📅 比赛列表", "比赛列表"));
+            await botService.SendAsync(e, reply);
+            return true;
+        }
+
         // 待发布：管理员查看草稿（未发布）比赛列表
         if (e.Detail.StartsWith("待发布"))
         {
