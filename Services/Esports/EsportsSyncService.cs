@@ -49,6 +49,71 @@ public sealed class EsportsSyncService(
         return new(matches.Count, eventsCreated, eventsUpdated, matchesCreated, matchesUpdated, failed, errors);
     }
 
+    /// <summary>
+    /// 半自动结算的第一步：把外部数据源已终结的<b>已发布胜负比赛</b>结果（result/winner）预填进表，
+    /// 并置 <c>pending_settlement=1</c> 等待管理员二次确认结算——<b>不</b>动金钱、<b>不</b>把 <c>status</c> 改为 2（已结束）。
+    ///
+    /// 候选过滤保证幂等与安全：仅取 <c>external_id</c> 非空、已发布、未结束（<c>status&lt;&gt;2</c>）、尚未待确认
+    /// （<c>pending_settlement=0</c>）的比赛——重复运行不会二次预填。UPDATE 的 <c>WHERE ... AND status&lt;&gt;2</c>
+    /// 是并发护栏：若另一路径在期间已结算，则本次写入命中 0 行而不覆盖。
+    ///
+    /// 含比分（score）/MVP 选项的比赛无法仅凭 winner 自动判定，归入 <see cref="EsportsResultSyncReport.RequiresManualSettlement"/>，
+    /// 留给管理员手动结算。单场预填失败只记一次告警并计入 <see cref="EsportsResultSyncReport.Failed"/>，不中断整批（批量韧性）。
+    /// </summary>
+    public async Task<EsportsResultSyncReport> SyncResultsAsync(CancellationToken cancellationToken = default)
+    {
+        List<(long MatchId, string ExternalId, string Options)> candidates = [];
+        sql.ExecuteDataSet(@"SELECT id, external_id, available_options
+            FROM betting_matches
+            WHERE external_id IS NOT NULL
+              AND is_published = 1
+              AND status <> 2
+              AND pending_settlement = 0");
+
+        if (sql.Success)
+        {
+            foreach (DataRow row in sql.DataSet.Tables[0].Rows)
+            {
+                candidates.Add((Convert.ToInt64(row["id"]), row["external_id"].ToString() ?? "", row["available_options"].ToString() ?? "[]"));
+            }
+        }
+
+        IReadOnlyList<ExternalEsportsResult> results = await provider.GetFinishedResultsAsync(candidates.Select(c => c.ExternalId).ToArray(), cancellationToken);
+        Dictionary<string, ExternalEsportsResult> byExternalId = results.ToDictionary(r => r.ExternalId);
+        int pending = 0, manual = 0, failed = 0;
+        List<string> errors = [];
+
+        foreach ((long matchId, string externalId, string options) in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!byExternalId.TryGetValue(externalId, out ExternalEsportsResult? result)) continue;
+
+            if (options.Contains("score", StringComparison.OrdinalIgnoreCase) || options.Contains("mvp", StringComparison.OrdinalIgnoreCase))
+            {
+                manual++;
+                continue;
+            }
+
+            try
+            {
+                sql.Parameters["@mid"] = matchId;
+                sql.Parameters["@result"] = result.ResultText;
+                sql.Parameters["@winner"] = result.Winner;
+                sql.Execute("UPDATE betting_matches SET result=@result, winner=@winner, pending_settlement=1 WHERE id=@mid AND status<>2");
+                if (!sql.Success) throw sql.LastException ?? new InvalidOperationException("结果预填失败。");
+                pending++;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                errors.Add($"{externalId}: {ex.Message}");
+                logger.LogWarning(ex, "预填比赛结果失败: {ExternalId}", externalId);
+            }
+        }
+
+        return new(candidates.Count, pending, manual, failed, errors);
+    }
+
     private long UpsertEvent(ExternalEsportsMatch match, ref int created, ref int updated)
     {
         sql.Parameters["@external_id"] = match.EventExternalId;
