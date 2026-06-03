@@ -8,6 +8,13 @@ public sealed class EsportsSyncHostedService(
     PandaScoreConfig pandaScoreConfig,
     ILogger<EsportsSyncHostedService> logger) : BackgroundService
 {
+    /// <summary>
+    /// 单 tick 的纯调度决策：自动化关闭时两项均不跑；开启时各自按 <c>now &gt;= next*</c> 的节律独立判定。
+    /// 抽成无副作用的静态方法以便单测覆盖节律门控，与 <see cref="ExecuteAsync"/> 的行为保持一致。
+    /// </summary>
+    internal static (bool RunSchedule, bool RunResult) DecideSyncs(bool automationEnabled, DateTime now, DateTime nextSchedule, DateTime nextResult)
+        => automationEnabled ? (now >= nextSchedule, now >= nextResult) : (false, false);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         DateTime nextSchedule = DateTime.MinValue;
@@ -17,18 +24,19 @@ public sealed class EsportsSyncHostedService(
         {
             try
             {
-                if (functionConfig.BettingAutomation)
+                DateTime now = DateTime.UtcNow;
+                (bool runSchedule, bool runResult) = DecideSyncs(functionConfig.BettingAutomation, now, nextSchedule, nextResult);
+                if (runSchedule || runResult)
                 {
-                    DateTime now = DateTime.UtcNow;
                     using IServiceScope scope = scopeFactory.CreateScope();
                     EsportsSyncService sync = scope.ServiceProvider.GetRequiredService<EsportsSyncService>();
 
-                    if (now >= nextSchedule)
+                    if (runSchedule)
                     {
                         await sync.SyncSchedulesAsync(stoppingToken);
                         nextSchedule = now.Add(pandaScoreConfig.SchedulePollInterval);
                     }
-                    if (now >= nextResult)
+                    if (runResult)
                     {
                         await sync.SyncResultsAsync(stoppingToken);
                         nextResult = now.Add(pandaScoreConfig.ResultPollInterval);

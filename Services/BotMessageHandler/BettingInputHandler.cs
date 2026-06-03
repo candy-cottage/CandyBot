@@ -60,12 +60,21 @@ public partial class CandyBotService
                 return true;
             }
 
-            EsportsScheduleSyncReport schedules = await esportsSyncService.SyncSchedulesAsync();
-            EsportsResultSyncReport results = await esportsSyncService.SyncResultsAsync();
-            md.Content = $"同步完成：抓取 {schedules.Fetched} 场，新增草稿 {schedules.MatchesCreated} 场，更新 {schedules.MatchesUpdated} 场；结果检查 {results.Checked} 场，待确认 {results.PendingSettlementCreated} 场。";
-            reply.Keyboard = new KeyboardMessage().AppendButtons(2,
-                Button.CreateCmdButton("📋 待发布", "待发布"),
-                Button.CreateCmdButton("📅 比赛列表", "比赛列表"));
+            try
+            {
+                EsportsScheduleSyncReport schedules = await esportsSyncService.SyncSchedulesAsync();
+                EsportsResultSyncReport results = await esportsSyncService.SyncResultsAsync();
+                md.Content = $"同步完成：抓取 {schedules.Fetched} 场，新增草稿 {schedules.MatchesCreated} 场，更新 {schedules.MatchesUpdated} 场；结果检查 {results.Checked} 场，待确认 {results.PendingSettlementCreated} 场。";
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2,
+                    Button.CreateCmdButton("📋 待发布", "待发布"),
+                    Button.CreateCmdButton("📅 比赛列表", "比赛列表"));
+            }
+            catch (Exception ex)
+            {
+                // 数据源异常（网络 / 5xx / JSON 解析等）不得静默——保证管理员总能收到反馈。
+                if (logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Error)) logger.LogError(ex, "立即同步失败");
+                md.Content = $"赛事同步失败：{ex.Message}";
+            }
             await botService.SendAsync(e, reply);
             return true;
         }
