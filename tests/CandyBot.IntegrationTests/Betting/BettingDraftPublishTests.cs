@@ -59,7 +59,7 @@ public class BettingDraftPublishTests(MySqlFixture fixture)
     }
 
     [Fact]
-    public async Task HandleBettingInput_待发布_管理员收到草稿列表()
+    public async Task HandleBettingInput_待发布比赛_管理员收到草稿列表()
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
@@ -85,7 +85,7 @@ public class BettingDraftPublishTests(MySqlFixture fixture)
             forzaSheetImporter: null!,
             esportsSyncService: null!);
 
-        bool handled = await service.HandleBettingInput(new C2CMessage { Detail = "待发布", Author = new() { Id = "admin" } }, AdminUser());
+        bool handled = await service.HandleBettingInput(new C2CMessage { Detail = "待发布比赛", Author = new() { Id = "admin" } }, AdminUser());
 
         handled.Should().BeTrue();
         sender.TextContents.Single().Should().Contain("NAVI vs FaZe");

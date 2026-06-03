@@ -89,7 +89,7 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
                 new PandaScoreConfig { GameSlug = "csgo" }));
 
     [Fact]
-    public async Task HandleBettingInput_立即同步_自动化维护中_拒绝且不触发同步()
+    public async Task HandleBettingInput_立即同步赛事_自动化维护中_拒绝且不触发同步()
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
@@ -100,7 +100,7 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
         CandyBotFunctionConfig cfg = new() { System = true, Betting = true, BettingAutomation = false, AllowAdminsDebug = false };
         CandyBotService service = BuildService(sql, cfg, sender, provider);
 
-        bool handled = await service.HandleBettingInput(new C2CMessage { Detail = "立即同步", Author = new() { Id = "admin" } }, AdminUser());
+        bool handled = await service.HandleBettingInput(new C2CMessage { Detail = "立即同步赛事", Author = new() { Id = "admin" } }, AdminUser());
 
         handled.Should().BeTrue();
         sender.TextContents.Single().Should().Be("赛事自动化正在维护，请稍后再试。");
@@ -109,7 +109,7 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
     }
 
     [Fact]
-    public async Task HandleBettingInput_立即同步_成功抓取一场并落草稿()
+    public async Task HandleBettingInput_立即同步赛事_成功抓取一场并落草稿()
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
@@ -119,7 +119,7 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
         CandyBotFunctionConfig cfg = new() { System = true, Betting = true, BettingAutomation = true };
         CandyBotService service = BuildService(sql, cfg, sender, provider);
 
-        bool handled = await service.HandleBettingInput(new C2CMessage { Detail = "立即同步", Author = new() { Id = "admin" } }, AdminUser());
+        bool handled = await service.HandleBettingInput(new C2CMessage { Detail = "立即同步赛事", Author = new() { Id = "admin" } }, AdminUser());
 
         handled.Should().BeTrue();
         string? reply = sender.TextContents.Single();

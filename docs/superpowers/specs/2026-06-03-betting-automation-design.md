@@ -21,7 +21,7 @@
 | 人在回路程度 | **半自动**：抓取入草 + 一键确认 | 自动化省人力，发布/派彩必须有人背书 |
 | 首期数据源 | **PandaScore API**（商业，有免费开发档） | 干净 JSON，含赛程/结果/博彩赔率，集成成本最低 |
 | 数据源耦合 | **可插拔适配器接口**，先接一家 | 符合"硬编码实现、设计接口"原则，留换源/多源口子 |
-| 抓取触发 | **定时后台轮询** + `立即同步` 指令兜底，二者**共用核心方法** | 真正"自动抓取"；核心方法可单测、可指令触发 |
+| 抓取触发 | **定时后台轮询** + `立即同步赛事` 指令兜底，二者**共用核心方法** | 真正"自动抓取"；核心方法可单测、可指令触发 |
 
 ### 不在本期范围（YAGNI / 标 TODO(debt)）
 
@@ -44,7 +44,7 @@ EsportsSyncService (scoped, 核心方法, 可单测/可指令触发)
    ▲
    │ 两个触发器共用核心:
    ├─ EsportsSyncHostedService : BackgroundService  (定时, 每轮开 DI scope)
-   └─ 管理员指令 立即同步 (兜底)
+   └─ 管理员指令 立即同步赛事 (兜底)
                                    │ 管理员一键 确认结算 <id>
                                    ▼
                           已有的 SettleMatch()  ← 一行不改, 事务化派彩
@@ -86,7 +86,7 @@ EsportsSyncService (scoped, 核心方法, 可单测/可指令触发)
 
 ### 3.3 草稿发布（管理员指令）
 
-- `待发布` —— 列出 `is_published = 0` 的比赛草稿，每条带 `发布比赛 <id>` 快捷按钮（复用 `Button.CreateCmdButton`）。
+- `待发布比赛` —— 列出 `is_published = 0` 的比赛草稿，每条带 `发布比赛 <id>` 快捷按钮（复用 `Button.CreateCmdButton`）。
 - `发布比赛 <id>` —— 置 `is_published = 1`；**连带把其父赛事一并发布**（避免空赛事泄给用户）。此后该比赛才进入用户的 `赛事列表`/`赛程`/`赛事详情`。
 - **用户侧已有查询要加 `WHERE is_published = 1` 过滤**：`GetEventsOverview`、`GetAllMatches`、`GetEventDetail`、`GetMatchDetail`（含其计数 SQL）。这是对已测代码的**行为变更**，按本仓库规范属 **P1：必须配套测试**。
 - 管理员手工建的赛事/比赛 `is_published` 默认 1，不受影响。
@@ -106,7 +106,7 @@ EsportsSyncService (scoped, 核心方法, 可单测/可指令触发)
 - 每轮先查 `CandyBotFunctionConfig.赛事自动化` 开关，**关则 no-op**。
 - 整轮包 `try/catch`：provider 宕机或异常只 `log` 警告、跳过本轮，**不崩溃服务**。
 
-**`立即同步` 指令**（兜底）—— 管理员触发，调用同一份 `SyncSchedulesAsync`/`SyncResultsAsync` 核心方法。
+**`立即同步赛事` 指令**（兜底）—— 管理员触发，调用同一份 `SyncSchedulesAsync`/`SyncResultsAsync` 核心方法。
 
 ### 3.6 配置与功能开关
 

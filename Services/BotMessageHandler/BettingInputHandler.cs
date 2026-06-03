@@ -50,8 +50,8 @@ public partial class CandyBotService
             return true;
         }
 
-        // 立即同步：管理员手动触发一次赛程抓取 + 结果预填（受赛事自动化开关控制）
-        if (e.Detail == "立即同步")
+        // 立即同步赛事：管理员手动触发一次赛程抓取 + 结果预填（受赛事自动化开关控制）
+        if (e.Detail == "立即同步赛事")
         {
             if (!await CheckUser(e, user, false)) return true;
             if (!WillGoOn(functionConfig.BettingAutomation, user))
@@ -66,7 +66,7 @@ public partial class CandyBotService
                 EsportsResultSyncReport results = await esportsSyncService.SyncResultsAsync();
                 md.Content = $"同步完成：抓取 {schedules.Fetched} 场，新增草稿 {schedules.MatchesCreated} 场，更新 {schedules.MatchesUpdated} 场；结果检查 {results.Checked} 场，待确认 {results.PendingSettlementCreated} 场。";
                 reply.Keyboard = new KeyboardMessage().AppendButtons(2,
-                    Button.CreateCmdButton("📋 待发布", "待发布"),
+                    Button.CreateCmdButton("📋 待发布列表", "待发布比赛"),
                     Button.CreateCmdButton("📅 比赛列表", "比赛列表"));
             }
             catch (Exception ex)
@@ -79,23 +79,23 @@ public partial class CandyBotService
             return true;
         }
 
-        // 待发布：管理员查看草稿（未发布）比赛列表
-        if (e.Detail.StartsWith("待发布"))
+        // 待发布比赛：管理员查看草稿（未发布）比赛列表
+        if (e.Detail.StartsWith("待发布比赛"))
         {
             if (!await CheckUser(e, user, false)) return true;
 
             int page = 1;
-            string detail = e.Detail.Replace("待发布", "").Trim();
+            string detail = e.Detail.Replace("待发布比赛", "").Trim();
             System.Text.RegularExpressions.Match match = GetFirstNumber().Match(detail);
             if (match.Success && int.TryParse(match.Value, out int p)) page = p;
 
             var (content, totalPages) = bettingService.GetPendingPublishMatches(page);
             md.Content = content;
             KeyboardMessage kb = new();
-            if (totalPages > 1) kb.AddPaginationRow("待发布 ", page, totalPages);
+            if (totalPages > 1) kb.AddPaginationRow("待发布比赛 ", page, totalPages);
             kb.AppendButtonsWithNewRow(2,
                 Button.CreateCmdButton("发布比赛", "发布比赛 ", enter: false),
-                Button.CreateCmdButton("立即同步", "立即同步"));
+                Button.CreateCmdButton("立即同步", "立即同步赛事"));
             reply.Keyboard = kb;
             await botService.SendAsync(e, reply);
             return true;
@@ -118,7 +118,7 @@ public partial class CandyBotService
                 : error;
             reply.Keyboard = new KeyboardMessage().AppendButtons(2,
                 Button.CreateCmdButton("🔍 比赛详情", $"比赛详情 {matchId}"),
-                Button.CreateCmdButton("📋 待发布", "待发布"));
+                Button.CreateCmdButton("📋 待发布比赛", "待发布比赛"));
             await botService.SendAsync(e, reply);
             return true;
         }
