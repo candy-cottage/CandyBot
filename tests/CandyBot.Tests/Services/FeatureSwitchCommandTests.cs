@@ -21,7 +21,7 @@ namespace CandyBot.Tests.Services;
 public class FeatureSwitchCommandTests
 {
     private static CandyBotService CreateService(IBotReplySender botService, CandyBotFunctionConfig cfg, IMemoryCache cache) =>
-        new(NullLogger<CandyBotService>.Instance, cache, sql: null!, cfg, taskQueue: null!,
+        new(NullLogger<CandyBotService>.Instance, cache, sql: null!, cfg, forzaConfig: null!, candyBotConfig: null!, taskQueue: null!, taskManager: null!,
             botService, bettingService: null!, sqlInitService: null!, userService: null!, forzaService: null!, forzaSheetImporter: null!);
 
     [Fact]

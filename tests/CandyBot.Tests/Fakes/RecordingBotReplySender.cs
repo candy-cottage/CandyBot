@@ -21,9 +21,14 @@ public sealed class RecordingBotReplySender : IBotReplySender
     /// </summary>
     public IEnumerable<string?> TextContents => _sent.Select(s => s.Reply.Text ?? s.Reply.Markdown?.Content);
 
-    public Task SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)
+    public Task<SendMessageResult?> SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)
     {
         _sent.Add(new SentReply(msg, reply, msgSeq));
-        return Task.CompletedTask;
+        return Task.FromResult((SendMessageResult?)null);
+    }
+
+    public Task<bool> RecallMessageAsync(IBotMessage msg, bool hideTip = false)
+    {
+        return Task.FromResult(false);
     }
 }
