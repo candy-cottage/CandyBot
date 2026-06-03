@@ -12,6 +12,7 @@ CandyBot 是一个基于 ASP.NET Core（`net10.0`）的 QQ 官方机器人后端
 |--------|------|------|
 | 用户存档系统 | ✅ 已落地 | 创建存档、昵称修改、糖果屋仪表盘 |
 | 电竞赛事预测系统 | ✅ 已落地 | 赛事/比赛查询、投注预测、领奖 |
+| 赛事预测自动化（CS2） | ⚙️ 半自动 | PandaScore 抓取赛程/结果 → 入未发布草稿 → 管理员发布/确认结算；赔率暂缓接入 |
 | 极限竞速：地平线6 | ✅ 已落地 | 查车、查赛道、查等级（数据源于 ZGC 车队调校表格） |
 | 经营模拟游戏（糖果屋） | ⚠️ 半成品 | `Entities/` 中有完整实体建模，帮助文本已编写，但业务处理器尚未实现 |
 
@@ -87,6 +88,7 @@ QQBotWebSocketService (BackgroundService)
 | `地平线` | `开启地平线` / `关闭地平线` | 地平线6 查询模块 |
 | `赛事系统` | `开启赛事系统` / `关闭赛事系统` | 赛事预测系统 |
 | `赛事只读` | `开启赛事只读` / `关闭赛事只读` | 禁止下注但保留查询 |
+| `赛事自动化` | `开启赛事自动化` / `关闭赛事自动化` | PandaScore 赛程/结果自动同步与管理员发布/确认结算 |
 
 `WillGoOn(isOpen, user)` 方法在 `isOpen == false` 时仍允许管理员通过（若 `AllowAdminsDebug` 开启）。
 
@@ -176,8 +178,10 @@ QQBotWebSocketService (BackgroundService)
 - `我的预测 [比赛ID] [页码]` —— 查看预测记录
 - `预测领奖` —— 领取已结算预测的奖励
 - `预测帮助` / `赛事帮助` —— 赛事帮助菜单
-- HTTP API：`BettingController` 提供 `/betting/events`、`/betting/matches` GET（匿名）
+- 赛事自动化（管理员，受 `赛事自动化` 开关控制）：`立即同步`（手动触发一次赛程抓取 + 结果预填）、`待发布`（查看未发布草稿比赛）、`发布比赛 <ID>`（把草稿发布为对用户可见）、`确认结算 <ID>`（对已预填结果的比赛二次确认结算）
+- HTTP API：`BettingController` 提供 `/betting/events`、`/betting/matches` GET（匿名，仅返回 `is_published=1` 的已发布赛事/比赛）
 - 管理指令（通过 `BettingService`）：创建赛事、创建比赛、修改比赛、结算比赛、退赛、取消比赛等
+- 自动化模块在 `Services/Esports/`：`IEsportsDataProvider` / `PandaScoreProvider`（外部数据源）、`EsportsSyncService`（幂等地把赛程入未发布草稿、把已终结结果预填为待确认）、`EsportsSyncHostedService`（定时调度），配置见 `PandaScoreConfig`。同步落库的赛事/比赛统一为草稿（`is_published=0`），结果预填为 `pending_settlement=1`，须经管理员 `发布比赛` / `确认结算` 才生效
 
 #### 腾讯文档集成 (`SheetService` + `SheetController`)
 
