@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Data;
+using System.Text;
 using CandyCottage.CandyBot.Models;
 using Milimoe.FunGame.Core.Entity;
 
@@ -68,6 +69,13 @@ public partial class CandyBotService
                         $"**文件：{fileId}**\r\n" +
                         $"❌ 同步车辆表失败：{report.ErrorMessage}\r\n" +
                         $"旧数据已保留。当前原表记录：{report.PreviousVehicleCount} 辆；解析：{report.ParsedVehicleCount} 辆。";
+                }
+
+                await sql.ExecuteDataSetAsync("Select Distinct Manufacturer From Vehicles");
+                if (sql.Success)
+                {
+                    string[] manufacturers = [.. sql.DataSet.Tables[0].AsEnumerable().Select(r => r["Manufacturer"].ToString() ?? "")];
+                    forzaConfig.Update(manufacturers);
                 }
 
                 await botService.SendAsync(e, reply);
@@ -188,9 +196,20 @@ public partial class CandyBotService
                 {
                     // 无空格：尝试拆分为「等级+比赛类型」或纯等级
                     (string? cls, string? match) = SplitClassAndMatchType(paramStr);
-                    classInput = cls;
-                    matchTypeInput = match;
-                    useAndCondition = matchTypeInput != null;
+                    if (cls != null)
+                    {
+                        // 成功匹配到等级模式（如 S1、A、S2-900 等）
+                        classInput = cls;
+                        matchTypeInput = match;
+                        useAndCondition = matchTypeInput != null;
+                    }
+                    else
+                    {
+                        // 无法匹配等级 → 将整个输入视为比赛类型
+                        classInput = null;
+                        matchTypeInput = paramStr;
+                        useAndCondition = false;
+                    }
                 }
 
                 // 执行查询
