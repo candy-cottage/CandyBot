@@ -16,7 +16,7 @@ namespace CandyCottage.CandyBot.Services
             UpdateStatuses();
 
             // 获取总数
-            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_events");
+            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_events WHERE is_published = 1");
             int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
             int totalPages = (int)Math.Ceiling(total / (double)pageSize);
             if (page > totalPages) page = totalPages;
@@ -30,7 +30,8 @@ namespace CandyCottage.CandyBot.Services
             sql.ExecuteDataSet($@"
                 SELECT id, name, status, start_time, end_time
                 FROM betting_events
-                ORDER BY 
+                WHERE is_published = 1
+                ORDER BY
                     CASE status WHEN 1 THEN 0 WHEN 0 THEN 1 ELSE 2 END,
                     CASE WHEN status = 2 THEN end_time END DESC,
                     CASE WHEN status != 2 THEN start_time END ASC
@@ -62,7 +63,7 @@ namespace CandyCottage.CandyBot.Services
 
             // 获取赛事信息
             sql.Parameters["@id"] = eventId;
-            sql.ExecuteDataSet("SELECT * FROM betting_events WHERE id = @id");
+            sql.ExecuteDataSet("SELECT * FROM betting_events WHERE id = @id AND is_published = 1");
             if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
                 return ("赛事不存在。", 0);
             DataRow evt = sql.DataSet.Tables[0].Rows[0];
@@ -79,7 +80,7 @@ namespace CandyCottage.CandyBot.Services
 
             // 比赛总数
             sql.Parameters["@eid"] = eventId;
-            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_matches WHERE event_id = @eid");
+            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_matches WHERE event_id = @eid AND is_published = 1");
             int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
             int totalPages = (int)Math.Ceiling(total / (double)pageSize);
             if (page > totalPages) page = totalPages;
@@ -93,8 +94,8 @@ namespace CandyCottage.CandyBot.Services
             sql.ExecuteDataSet($@"
                 SELECT id, team1_name, team2_name, status, bet_deadline, stage, start_time, result, betting_enabled
                 FROM betting_matches
-                WHERE event_id = @eid
-                ORDER BY 
+                WHERE event_id = @eid AND is_published = 1
+                ORDER BY
                     CASE status WHEN 1 THEN 0 WHEN 0 THEN 1 ELSE 2 END,
                     CASE WHEN status = 2 THEN start_time END DESC,
                     CASE WHEN status != 2 THEN start_time END ASC
@@ -139,7 +140,7 @@ namespace CandyCottage.CandyBot.Services
             UpdateStatuses();
 
             // 总数
-            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_matches");
+            sql.ExecuteDataSet("SELECT COUNT(*) FROM betting_matches m JOIN betting_events e ON m.event_id = e.id WHERE m.is_published = 1 AND e.is_published = 1");
             int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
             int totalPages = (int)Math.Ceiling(total / (double)pageSize);
             if (page > totalPages) page = totalPages;
@@ -154,7 +155,8 @@ namespace CandyCottage.CandyBot.Services
                        e.name AS event_name, e.id AS event_id, m.result
                 FROM betting_matches m
                 LEFT JOIN betting_events e ON m.event_id = e.id
-                ORDER BY 
+                WHERE m.is_published = 1 AND e.is_published = 1
+                ORDER BY
                     CASE m.status WHEN 1 THEN 0 WHEN 0 THEN 1 ELSE 2 END,
                     CASE WHEN m.status = 2 THEN m.start_time END DESC,
                     CASE WHEN m.status != 2 THEN m.start_time END ASC
@@ -197,7 +199,7 @@ namespace CandyCottage.CandyBot.Services
                 UpdateStatuses();
 
                 sql.Parameters["@mid"] = matchId;
-                sql.ExecuteDataSet("SELECT * FROM betting_matches WHERE id = @mid");
+                sql.ExecuteDataSet("SELECT * FROM betting_matches WHERE id = @mid AND is_published = 1");
                 if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0) return "比赛不存在。";
                 DataRow row = sql.DataSet.Tables[0].Rows[0];
                 long eventId = Convert.ToInt64(row["event_id"]);
@@ -222,7 +224,7 @@ namespace CandyCottage.CandyBot.Services
 
                 string eventName = "";
                 sql.Parameters["@eid"] = eventId;
-                DataRow? rowEvent = sql.ExecuteDataRow("SELECT name FROM betting_events WHERE id = @eid");
+                DataRow? rowEvent = sql.ExecuteDataRow("SELECT name FROM betting_events WHERE id = @eid AND is_published = 1");
                 if (rowEvent != null)
                 {
                     eventName = rowEvent["name"].ToString() ?? "";
@@ -341,7 +343,7 @@ namespace CandyCottage.CandyBot.Services
             }
 
             sql.Parameters["@mid"] = matchId;
-            sql.ExecuteDataSet("SELECT start_time, bet_deadline, status FROM betting_matches WHERE id = @mid");
+            sql.ExecuteDataSet("SELECT start_time, bet_deadline, status FROM betting_matches WHERE id = @mid AND is_published = 1");
             if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
             {
                 error = "比赛不存在。";
@@ -362,7 +364,7 @@ namespace CandyCottage.CandyBot.Services
             {
                 // 检查比赛
                 sql.Parameters["@mid"] = matchId;
-                sql.ExecuteDataSet("SELECT * FROM betting_matches WHERE id = @mid");
+                sql.ExecuteDataSet("SELECT * FROM betting_matches WHERE id = @mid AND is_published = 1");
                 if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
                 {
                     error = "比赛不存在。";
