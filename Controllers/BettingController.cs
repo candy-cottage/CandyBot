@@ -23,9 +23,14 @@ namespace CandyCottage.CandyBot.Controllers
             if (sql == null) return StatusCode(500, "数据库连接失败");
             sql.ClearParametersAfterExecute = false;
 
-            // 动态条件
-            string where = status.HasValue ? "WHERE status = @status" : "";
-            if (status.HasValue) sql.Parameters["@status"] = status.Value;
+            // 匿名端点只暴露已发布赛事；is_published = 1 始终生效，再与可选的状态过滤 AND。
+            var conditions = new List<string> { "is_published = 1" };
+            if (status.HasValue)
+            {
+                conditions.Add("status = @status");
+                sql.Parameters["@status"] = status.Value;
+            }
+            string where = "WHERE " + string.Join(" AND ", conditions);
 
             // 总数
             sql.ExecuteDataSet($"SELECT COUNT(*) FROM betting_events {where}");
@@ -63,7 +68,7 @@ namespace CandyCottage.CandyBot.Controllers
             sql.ClearParametersAfterExecute = false;
 
             sql.Parameters["@id"] = id;
-            DataRow? row = sql.ExecuteDataRow("SELECT * FROM betting_events WHERE id = @id");
+            DataRow? row = sql.ExecuteDataRow("SELECT * FROM betting_events WHERE id = @id AND is_published = 1");
             if (row == null) return NotFound();
 
             return Ok(MapEvent(row));
@@ -83,7 +88,8 @@ namespace CandyCottage.CandyBot.Controllers
             if (sql == null) return StatusCode(500, "数据库连接失败");
             sql.ClearParametersAfterExecute = false;
 
-            var conditions = new List<string>();
+            // 匿名端点只暴露已发布比赛；is_published = 1 始终生效，再与可选的 event_id/status 过滤 AND。
+            var conditions = new List<string> { "is_published = 1" };
             if (eventId.HasValue)
             {
                 conditions.Add("event_id = @eventId");
@@ -94,7 +100,7 @@ namespace CandyCottage.CandyBot.Controllers
                 conditions.Add("status = @status");
                 sql.Parameters["@status"] = status.Value;
             }
-            string where = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
+            string where = "WHERE " + string.Join(" AND ", conditions);
 
             sql.ExecuteDataSet($"SELECT COUNT(*) FROM betting_matches {where}");
             int total = sql.Success ? Convert.ToInt32(sql.DataSet.Tables[0].Rows[0][0]) : 0;
@@ -131,7 +137,7 @@ namespace CandyCottage.CandyBot.Controllers
             sql.ClearParametersAfterExecute = false;
 
             sql.Parameters["@id"] = id;
-            DataRow? row = sql.ExecuteDataRow("SELECT * FROM betting_matches WHERE id = @id");
+            DataRow? row = sql.ExecuteDataRow("SELECT * FROM betting_matches WHERE id = @id AND is_published = 1");
             if (row == null) return NotFound();
 
             return Ok(MapMatch(row));
