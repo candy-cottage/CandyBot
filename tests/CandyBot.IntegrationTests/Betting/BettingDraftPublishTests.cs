@@ -82,7 +82,6 @@ public class BettingDraftPublishTests(MySqlFixture fixture)
             sql,
             cfg,
             forzaConfig: null!,
-            candyBotConfig: null!,
             taskQueue: null!,
             taskManager: null!,
             sender,
@@ -91,7 +90,8 @@ public class BettingDraftPublishTests(MySqlFixture fixture)
             userService: null!,
             forzaService: null!,
             forzaSheetImporter: null!,
-            esportsSyncService: null!);
+            esportsSyncService: null!,
+            userAPITokenService: null!);
 
         bool handled = await service.HandleBettingInput(new C2CMessage { Detail = "待发布比赛", Author = new() { Id = "admin" } }, AdminUser());
 

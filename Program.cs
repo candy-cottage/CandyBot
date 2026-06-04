@@ -7,6 +7,8 @@ using CandyCottage.CandyBot.Services.SystemServices;
 using CandyCottage.CandyBot.Utilities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging.Console;
+using Milimoe.FunGame.Core.Api.Transmittal;
+using Milimoe.FunGame.Core.Library.Constant;
 using Scalar.AspNetCore;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -55,13 +57,23 @@ builder.Services.AddHostedService<TaskSchedulerService>();
 builder.Services.AddHostedService<SystemInitializeService>();
 builder.Services.AddScoped<MySQLHelper>();
 builder.Services.AddScoped<SQLiteHelper>();
-builder.Services.AddScoped(SQLConnectionConfig.NewSQLHelper);
+builder.Services.AddScoped<SQLHelper>(sp =>
+{
+    SQLConnectionConfig config = sp.GetRequiredService<SQLConnectionConfig>();
+    return config.Mode switch
+    {
+        SQLMode.MySQL => sp.GetRequiredService<MySQLHelper>(),
+        SQLMode.SQLite => sp.GetRequiredService<SQLiteHelper>(),
+        _ => throw new NotSupportedException($"不支持的数据库模式：{config.Mode}")
+    };
+});
 builder.Services.AddScoped<SQLTableInitializeService>();
 builder.Services.AddHostedService<QQBotWebSocketService>();
 builder.Services.AddScoped<QQBotService>();
 builder.Services.AddScoped<IBotReplySender>(sp => sp.GetRequiredService<QQBotService>());
 builder.Services.AddScoped<SheetService>();
 builder.Services.AddScoped<UserService>();
+builder.Services.AddScoped<UserAPITokenService>();
 builder.Services.AddScoped<BettingService>();
 builder.Services.AddScoped<ForzaService>();
 builder.Services.AddScoped<NoOpSheetParseDiagnostic>();
@@ -69,9 +81,8 @@ builder.Services.AddScoped<DeepSeekSheetParseDiagnostic>();
 builder.Services.AddScoped<ISheetParseDiagnostic>(sp =>
 {
     DeepSeekConfig config = sp.GetRequiredService<DeepSeekConfig>();
-    return config.Enabled && !string.IsNullOrWhiteSpace(config.ApiKey)
-        ? sp.GetRequiredService<DeepSeekSheetParseDiagnostic>()
-        : sp.GetRequiredService<NoOpSheetParseDiagnostic>();
+    return config.Enabled && !string.IsNullOrWhiteSpace(config.ApiKey) ?
+        sp.GetRequiredService<DeepSeekSheetParseDiagnostic>() : sp.GetRequiredService<NoOpSheetParseDiagnostic>();
 });
 builder.Services.AddScoped<IForzaSheetImporter, ForzaSheetImporter>();
 // 赛事自动化：PandaScoreProvider 的构造函数需要一个裸 HttpClient。
