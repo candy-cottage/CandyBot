@@ -51,4 +51,12 @@ public class PandaScoreConfig
         SchedulePollInterval = TimeSpan.FromMinutes(Math.Max(1, scheduleMinutes));
         ResultPollInterval = TimeSpan.FromMinutes(Math.Max(1, resultMinutes));
     }
+
+    public void PersistScopeFilters()
+    {
+        Config["LeagueIdsOrSlugs"] = LeagueIdsOrSlugs;
+        Config["SerieIdsOrSlugs"] = SerieIdsOrSlugs;
+        Config["TournamentIdsOrSlugs"] = TournamentIdsOrSlugs;
+        Config.SaveConfig();
+    }
 }

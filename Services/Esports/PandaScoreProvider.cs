@@ -11,7 +11,7 @@ public sealed class PandaScoreProvider(
     HttpClient httpClient,
     IMemoryCache cache,
     PandaScoreConfig config,
-    ILogger<PandaScoreProvider> logger) : IEsportsDataProvider
+    ILogger<PandaScoreProvider> logger) : IEsportsDataProvider, IEsportsScopeSearchProvider
 {
     public async Task<IReadOnlyList<ExternalEsportsMatch>> GetUpcomingMatchesAsync(string gameSlug, DateTime since, CancellationToken cancellationToken = default)
     {
@@ -84,6 +84,43 @@ public sealed class PandaScoreProvider(
         return results;
     }
 
+    public async Task<IReadOnlyList<ExternalEsportsScope>> SearchScopesAsync(string gameSlug, string keyword, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(config.ApiKey) || string.IsNullOrWhiteSpace(keyword))
+        {
+            return [];
+        }
+
+        string cacheKey = $"pandascore:scope-search:{gameSlug}:{keyword.Trim().ToLowerInvariant()}";
+        if (cache.TryGetValue(cacheKey, out IReadOnlyList<ExternalEsportsScope>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        List<ExternalEsportsScope> result = [];
+        string baseUrl = config.BaseUrl.TrimEnd('/');
+        string query = $"search[name]={Uri.EscapeDataString(keyword.Trim())}&page[size]=5";
+        foreach ((string type, string resource) in new[] { ("league", "videogames/{game}/leagues"), ("serie", "videogames/{game}/series"), ("tournament", "tournaments") })
+        {
+            string path = resource.Replace("{game}", Uri.EscapeDataString(gameSlug), StringComparison.Ordinal);
+            string url = $"{baseUrl}/{path}?{query}";
+            using HttpRequestMessage request = new(HttpMethod.Get, url);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
+
+            string json = await SendAsync(request, cancellationToken);
+            result.AddRange(PandaScoreMapper.MapScopes(json, type));
+        }
+
+        IReadOnlyList<ExternalEsportsScope> scopes = result
+            .GroupBy(scope => (scope.Type, scope.Value), StringTupleComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Take(10)
+            .ToList();
+        cache.Set(cacheKey, scopes, TimeSpan.FromMinutes(10));
+        return scopes;
+    }
+
     private async Task<string> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         using HttpResponseMessage response = await httpClient.SendAsync(request, cancellationToken);
@@ -150,6 +187,12 @@ internal static class PandaScoreMapper
             .Select(MapResult)
             .ToList() ?? [];
 
+    public static List<ExternalEsportsScope> MapScopes(string json, string type)
+        => JsonSerializer.Deserialize<List<PandaScoreScopeEntity>>(json, Options)?
+            .Select(scope => MapScope(scope, type))
+            .Where(scope => !string.IsNullOrWhiteSpace(scope.Value))
+            .ToList() ?? [];
+
     private static ExternalEsportsMatch MapMatch(PandaScoreMatch source)
     {
         PandaScoreOpponent? team1 = (source.Opponents ?? []).ElementAtOrDefault(0)?.Opponent;
@@ -191,6 +234,31 @@ internal static class PandaScoreMapper
         int score2 = (source.Results ?? []).FirstOrDefault(r => r.TeamId == team2Id)?.Score ?? 0;
         return new(source.Id.ToString(), $"{score1}:{score2}", winner);
     }
+
+    private static ExternalEsportsScope MapScope(PandaScoreScopeEntity source, string type)
+    {
+        string name = source.FullName ?? source.Name ?? "";
+        string value = !string.IsNullOrWhiteSpace(source.Slug) ? source.Slug! : source.Id?.ToString() ?? "";
+        string? parent = type switch
+        {
+            "serie" => source.League?.Name,
+            "tournament" => source.Serie?.FullName ?? source.Serie?.Name ?? source.League?.Name,
+            _ => null,
+        };
+        return new(type, name, value, source.Id, parent);
+    }
+}
+
+internal sealed class StringTupleComparer : IEqualityComparer<(string Type, string Value)>
+{
+    public static StringTupleComparer OrdinalIgnoreCase { get; } = new();
+
+    public bool Equals((string Type, string Value) x, (string Type, string Value) y)
+        => string.Equals(x.Type, y.Type, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Value, y.Value, StringComparison.OrdinalIgnoreCase);
+
+    public int GetHashCode((string Type, string Value) obj)
+        => HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Type), StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Value));
 }
 
 internal sealed record PandaScoreMatch(
@@ -227,3 +295,11 @@ internal sealed record PandaScoreOpponent(
 internal sealed record PandaScoreResult(
     [property: JsonPropertyName("team_id")] long? TeamId,
     [property: JsonPropertyName("score")] int Score);
+
+internal sealed record PandaScoreScopeEntity(
+    [property: JsonPropertyName("id")] long? Id,
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("slug")] string? Slug,
+    [property: JsonPropertyName("full_name")] string? FullName,
+    [property: JsonPropertyName("league")] PandaScoreNamedEntity? League,
+    [property: JsonPropertyName("serie")] PandaScoreSerie? Serie);

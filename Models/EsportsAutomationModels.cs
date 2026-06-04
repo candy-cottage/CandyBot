@@ -19,6 +19,13 @@ public sealed record ExternalEsportsResult(
     string ResultText,
     int Winner);
 
+public sealed record ExternalEsportsScope(
+    string Type,
+    string Name,
+    string Value,
+    long? Id = null,
+    string? ParentName = null);
+
 public sealed record EsportsScheduleSyncReport(
     int Fetched,
     int EventsCreated,

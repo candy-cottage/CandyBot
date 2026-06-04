@@ -63,6 +63,31 @@ public class PandaScoreProviderTests
     }
 
     [Fact]
+    public async Task SearchScopesAsync_按游戏搜索三层赛事候选项()
+    {
+        RecordingHttpMessageHandler handler = new(SampleScopeListJson);
+        using HttpClient client = new(handler);
+        using MemoryCache cache = new(new MemoryCacheOptions());
+        PandaScoreProvider provider = new(
+            client,
+            cache,
+            new PandaScoreConfig { ApiKey = "token", BaseUrl = "https://example.test", GameSlug = "csgo" },
+            NullLogger<PandaScoreProvider>.Instance);
+
+        IReadOnlyList<ExternalEsportsScope> scopes = await provider.SearchScopesAsync("csgo", "blast");
+
+        handler.RequestUris.Select(uri => uri.AbsolutePath).Should().BeEquivalentTo(
+            "/videogames/csgo/leagues",
+            "/videogames/csgo/series",
+            "/tournaments");
+        handler.RequestUris.Should().OnlyContain(uri => uri.Query.Contains("search[name]=blast", StringComparison.Ordinal));
+        scopes.Should().HaveCount(3);
+        scopes.Should().Contain(scope => scope.Type == "league" && scope.Value == "blast-premier");
+        scopes.Should().Contain(scope => scope.Type == "serie" && scope.ParentName == "BLAST Premier");
+        scopes.Should().Contain(scope => scope.Type == "tournament" && scope.ParentName == "BLAST Premier 2026");
+    }
+
+    [Fact]
     public void MapMatch_两队未开赛比赛_映射为外部比赛草稿()
     {
         const string json = """
@@ -241,6 +266,19 @@ public class PandaScoreProviderTests
           { "opponent": { "id": 100, "name": "NAVI" }, "type": "Team" },
           { "opponent": { "id": 200, "name": "FaZe" }, "type": "Team" }
         ]
+      }
+    ]
+    """;
+
+    private const string SampleScopeListJson = """
+    [
+      {
+        "id": 4197,
+        "name": "BLAST Premier",
+        "full_name": "BLAST Premier 2026",
+        "slug": "blast-premier",
+        "league": { "id": 4197, "name": "BLAST Premier" },
+        "serie": { "id": 6201, "name": "2026", "full_name": "BLAST Premier 2026" }
       }
     ]
     """;
