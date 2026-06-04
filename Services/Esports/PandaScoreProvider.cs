@@ -102,7 +102,9 @@ public sealed class PandaScoreProvider(
         List<ExternalEsportsScope> result = [];
         string baseUrl = config.BaseUrl.TrimEnd('/');
         string query = $"search[name]={Uri.EscapeDataString(keyword.Trim())}&page[size]=5";
-        foreach ((string type, string resource) in new[] { ("league", "videogames/{game}/leagues"), ("serie", "videogames/{game}/series"), ("tournament", "tournaments") })
+        // 锦标赛没有 videogames/{game}/tournaments 端点，改用游戏快捷端点（如 /csgo/tournaments），
+        // 避免全局 /tournaments 命中其他游戏的锦标赛被误加为筛选。
+        foreach ((string type, string resource) in new[] { ("league", "videogames/{game}/leagues"), ("serie", "videogames/{game}/series"), ("tournament", "{game}/tournaments") })
         {
             string path = resource.Replace("{game}", Uri.EscapeDataString(gameSlug), StringComparison.Ordinal);
             string url = $"{baseUrl}/{path}?{query}";

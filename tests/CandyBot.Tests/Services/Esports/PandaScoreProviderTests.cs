@@ -102,10 +102,12 @@ public class PandaScoreProviderTests
 
         IReadOnlyList<ExternalEsportsScope> scopes = await provider.SearchScopesAsync("csgo", "blast");
 
+        // 锦标赛搜索必须走按游戏限定的端点（/csgo/tournaments），否则全局 /tournaments
+        // 会返回其他游戏的锦标赛，管理员误加后会把非 CS 比赛同步进投注草稿。
         handler.RequestUris.Select(uri => uri.AbsolutePath).Should().BeEquivalentTo(
             "/videogames/csgo/leagues",
             "/videogames/csgo/series",
-            "/tournaments");
+            "/csgo/tournaments");
         handler.RequestUris.Should().OnlyContain(uri => uri.Query.Contains("search[name]=blast", StringComparison.Ordinal));
         scopes.Should().HaveCount(3);
         scopes.Should().Contain(scope => scope.Type == "league" && scope.Value == "blast-premier");
