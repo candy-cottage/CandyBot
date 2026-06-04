@@ -370,4 +370,3 @@ FodyWeavers.xsd
 
 # 仓库根目录的临时/草稿目录（私有腾讯表 dump、一次性导入器脚本、实现计划等，勿入库）
 /tmp/
-/docs/plans/
