@@ -38,6 +38,7 @@ public partial class CandyBotService
                 }
 
                 md.Content = userAPITokenService.ShowTokenList(user!.Username);
+                await botService.SendAsync(e, reply);
                 return true;
             }
 
@@ -60,6 +61,7 @@ public partial class CandyBotService
                 }
 
                 md.Content = userAPITokenService.DeleteToken(user!.Username, param);
+                await botService.SendAsync(e, reply);
                 return true;
             }
 
@@ -107,6 +109,7 @@ public partial class CandyBotService
                             });
                         });
                     }
+                    return true;
                 }
                 else if (result == 2)
                 {
