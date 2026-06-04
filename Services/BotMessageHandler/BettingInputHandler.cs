@@ -1028,8 +1028,15 @@ public partial class CandyBotService
                 return true;
             }
 
-            IReadOnlyList<ExternalEsportsMatch> matches = await esportsSyncService.PreviewFilteredMatchesAsync();
-            await botService.SendAsync(e, RenderScopePreview(matches));
+            try
+            {
+                IReadOnlyList<ExternalEsportsMatch> matches = await esportsSyncService.PreviewFilteredMatchesAsync();
+                await botService.SendAsync(e, RenderScopePreview(matches));
+            }
+            catch (Exception ex)
+            {
+                await botService.SendAsync(e, $"预览赛事筛选遇到错误：{ex.Message}");
+            }
             return true;
         }
 

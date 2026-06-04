@@ -23,7 +23,7 @@ public sealed class PandaScoreProvider(
 
         // 截断到整点：调用方传入 DateTime.UtcNow，若直接拼入 URL 会让缓存键每次都不同、缓存永不命中。
         since = since.Date.AddHours(since.Hour);
-        IReadOnlyList<string> urls = BuildUpcomingMatchUrls(gameSlug, since);
+        List<string> urls = BuildUpcomingMatchUrls(gameSlug, since);
         string cacheKey = $"pandascore:upcoming:{gameSlug}:{string.Join("|", urls)}";
         if (cache.TryGetValue(cacheKey, out IReadOnlyList<ExternalEsportsMatch>? cached) && cached is not null)
         {
@@ -58,13 +58,8 @@ public sealed class PandaScoreProvider(
         }
 
         // 同一场比赛可能同时属于 league/serie/tournament 作用域，入库前按外部比赛 ID 合并。
-        IReadOnlyList<ExternalEsportsMatch> unique = urls.Count == 1
-            ? result
-            : result
-                .GroupBy(match => match.ExternalId)
-                .Select(group => group.First())
-                .OrderBy(match => match.StartTime)
-                .ToList();
+        IReadOnlyList<ExternalEsportsMatch> unique = urls.Count == 1 ? result : [.. result.GroupBy(match => match.ExternalId).
+            Select(group => group.First()).OrderBy(match => match.StartTime)];
         cache.Set(cacheKey, unique, TimeSpan.FromMinutes(5));
         return unique;
     }
@@ -93,9 +88,7 @@ public sealed class PandaScoreProvider(
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
 
             string json = await SendAsync(request, cancellationToken);
-            List<ExternalEsportsResult> batchResults = PandaScoreMapper.MapResults(json)
-                .Where(result => result.Winner is 1 or 2)
-                .ToList();
+            List<ExternalEsportsResult> batchResults = [.. PandaScoreMapper.MapResults(json).Where(result => result.Winner is 1 or 2)];
             cache.Set(cacheKey, batchResults, TimeSpan.FromMinutes(15));
             results.AddRange(batchResults);
         }
@@ -118,9 +111,7 @@ public sealed class PandaScoreProvider(
         List<ExternalEsportsScope> result = [];
         string baseUrl = config.BaseUrl.TrimEnd('/');
         string query = $"search[name]={Uri.EscapeDataString(keyword.Trim())}&page[size]=5";
-        // 锦标赛没有 videogames/{game}/tournaments 端点，改用游戏快捷端点（如 /csgo/tournaments），
-        // 避免全局 /tournaments 命中其他游戏的锦标赛被误加为筛选。
-        foreach ((string type, string resource) in new[] { ("league", "videogames/{game}/leagues"), ("serie", "videogames/{game}/series"), ("tournament", "{game}/tournaments") })
+        foreach ((string type, string resource) in new[] { ("league", "{game}/leagues"), ("serie", "{game}/series"), ("tournament", "{game}/tournaments") })
         {
             string path = resource.Replace("{game}", Uri.EscapeDataString(gameSlug), StringComparison.Ordinal);
             string url = $"{baseUrl}/{path}?{query}";
@@ -132,11 +123,8 @@ public sealed class PandaScoreProvider(
             result.AddRange(PandaScoreMapper.MapScopes(json, type));
         }
 
-        IReadOnlyList<ExternalEsportsScope> scopes = result
-            .GroupBy(scope => (scope.Type, scope.Value), StringTupleComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
-            .Take(10)
-            .ToList();
+        IReadOnlyList<ExternalEsportsScope> scopes = [.. result.GroupBy(scope => (scope.Type, scope.Value), StringTupleComparer.OrdinalIgnoreCase).
+            Select(group => group.First()).Take(10)];
         cache.Set(cacheKey, scopes, TimeSpan.FromMinutes(10));
         return scopes;
     }
@@ -151,7 +139,7 @@ public sealed class PandaScoreProvider(
     /// <summary>
     /// 有赛事作用域配置时改用 PandaScore 层级端点；未配置时保持原有按游戏全量拉取。
     /// </summary>
-    private IReadOnlyList<string> BuildUpcomingMatchUrls(string gameSlug, DateTime since)
+    private List<string> BuildUpcomingMatchUrls(string gameSlug, DateTime since)
     {
         string baseUrl = config.BaseUrl.TrimEnd('/');
         string query = BuildUpcomingMatchQuery(since);
