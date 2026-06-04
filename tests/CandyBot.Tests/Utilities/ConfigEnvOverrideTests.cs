@@ -224,6 +224,9 @@ public class ConfigEnvOverrideTests
             ["CANDYBOT_PANDASCORE_APIKEY"] = "env-key",
             ["CANDYBOT_PANDASCORE_BASEURL"] = "https://api.pandascore.co",
             ["CANDYBOT_PANDASCORE_GAMESLUG"] = "csgo",
+            ["CANDYBOT_PANDASCORE_LEAGUEIDSORSLUGS"] = "league-env",
+            ["CANDYBOT_PANDASCORE_SERIEIDSORSLUGS"] = "serie-env",
+            ["CANDYBOT_PANDASCORE_TOURNAMENTIDSORSLUGS"] = "tournament-env",
             ["CANDYBOT_PANDASCORE_SCHEDULEPOLLINTERVALMINUTES"] = "30",
             ["CANDYBOT_PANDASCORE_RESULTPOLLINTERVALMINUTES"] = "5",
         }, () =>
@@ -231,6 +234,7 @@ public class ConfigEnvOverrideTests
             PluginConfig seed = new("candybot", "pandascore");
             seed.LoadConfig();
             seed["ApiKey"] = "disk-key";
+            seed["LeagueIdsOrSlugs"] = "league-disk";
             seed.SaveConfig();
 
             PandaScoreConfig config = new();
@@ -239,12 +243,16 @@ public class ConfigEnvOverrideTests
             config.ApiKey.Should().Be("env-key");
             config.BaseUrl.Should().Be("https://api.pandascore.co");
             config.GameSlug.Should().Be("csgo");
+            config.LeagueIdsOrSlugs.Should().Be("league-env");
+            config.SerieIdsOrSlugs.Should().Be("serie-env");
+            config.TournamentIdsOrSlugs.Should().Be("tournament-env");
             config.SchedulePollInterval.Should().Be(TimeSpan.FromMinutes(30));
             config.ResultPollInterval.Should().Be(TimeSpan.FromMinutes(5));
 
             PluginConfig reloaded = new("candybot", "pandascore");
             reloaded.LoadConfig();
             (reloaded.GetOrAdd("ApiKey", "") ?? "").Should().Be("disk-key");
+            (reloaded.GetOrAdd("LeagueIdsOrSlugs", "") ?? "").Should().Be("league-disk");
         });
     }
 }

@@ -21,21 +21,34 @@ public sealed class PandaScoreProvider(
             return [];
         }
 
-        string cacheKey = $"pandascore:upcoming:{gameSlug}:{since:yyyyMMddHH}";
+        IReadOnlyList<string> urls = BuildUpcomingMatchUrls(gameSlug, since);
+        string cacheKey = $"pandascore:upcoming:{gameSlug}:{since:yyyyMMddHH}:{string.Join("|", urls)}";
         if (cache.TryGetValue(cacheKey, out IReadOnlyList<ExternalEsportsMatch>? cached) && cached is not null)
         {
             return cached;
         }
 
-        string url = $"{config.BaseUrl.TrimEnd('/')}/{gameSlug}/matches?filter[status]=not_started&range[scheduled_at]={Uri.EscapeDataString(since.ToString("O"))},{Uri.EscapeDataString(since.AddDays(30).ToString("O"))}&sort=scheduled_at&page[size]=100";
-        using HttpRequestMessage request = new(HttpMethod.Get, url);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
+        List<ExternalEsportsMatch> result = [];
+        foreach (string url in urls)
+        {
+            using HttpRequestMessage request = new(HttpMethod.Get, url);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
 
-        string json = await SendAsync(request, cancellationToken);
-        List<ExternalEsportsMatch> result = PandaScoreMapper.MapMatches(json);
-        cache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
-        return result;
+            string json = await SendAsync(request, cancellationToken);
+            result.AddRange(PandaScoreMapper.MapMatches(json));
+        }
+
+        // 同一场比赛可能同时属于 league/serie/tournament 作用域，入库前按外部比赛 ID 合并。
+        IReadOnlyList<ExternalEsportsMatch> unique = urls.Count == 1
+            ? result
+            : result
+                .GroupBy(match => match.ExternalId)
+                .Select(group => group.First())
+                .OrderBy(match => match.StartTime)
+                .ToList();
+        cache.Set(cacheKey, unique, TimeSpan.FromMinutes(5));
+        return unique;
     }
 
     public async Task<IReadOnlyList<ExternalEsportsResult>> GetFinishedResultsAsync(IReadOnlyCollection<string> externalIds, CancellationToken cancellationToken = default)
@@ -77,6 +90,43 @@ public sealed class PandaScoreProvider(
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsStringAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// 有赛事作用域配置时改用 PandaScore 层级端点；未配置时保持原有按游戏全量拉取。
+    /// </summary>
+    private IReadOnlyList<string> BuildUpcomingMatchUrls(string gameSlug, DateTime since)
+    {
+        string baseUrl = config.BaseUrl.TrimEnd('/');
+        string query = BuildUpcomingMatchQuery(since);
+        List<string> urls = [];
+        AddScopedMatchUrls(urls, baseUrl, "leagues", config.LeagueIdsOrSlugs, query);
+        AddScopedMatchUrls(urls, baseUrl, "series", config.SerieIdsOrSlugs, query);
+        AddScopedMatchUrls(urls, baseUrl, "tournaments", config.TournamentIdsOrSlugs, query);
+
+        if (urls.Count == 0)
+        {
+            urls.Add($"{baseUrl}/{Uri.EscapeDataString(gameSlug)}/matches?{query}");
+        }
+
+        return urls;
+    }
+
+    private static string BuildUpcomingMatchQuery(DateTime since)
+        => $"filter[status]=not_started&range[scheduled_at]={Uri.EscapeDataString(since.ToString("O"))},{Uri.EscapeDataString(since.AddDays(30).ToString("O"))}&sort=scheduled_at&page[size]=100";
+
+    private static void AddScopedMatchUrls(List<string> urls, string baseUrl, string resource, string configuredScopes, string query)
+    {
+        foreach (string scope in SplitScopes(configuredScopes))
+        {
+            urls.Add($"{baseUrl}/{resource}/{Uri.EscapeDataString(scope)}/matches?{query}");
+        }
+    }
+
+    private static IEnumerable<string> SplitScopes(string configuredScopes)
+        => configuredScopes
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(scope => !string.IsNullOrWhiteSpace(scope))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 }
 
 internal static class PandaScoreMapper

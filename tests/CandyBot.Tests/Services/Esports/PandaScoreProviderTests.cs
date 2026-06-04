@@ -1,12 +1,67 @@
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services.Esports;
+using CandyCottage.CandyBot.Utilities;
 using FluentAssertions;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace CandyBot.Tests.Services.Esports;
 
 public class PandaScoreProviderTests
 {
+    [Fact]
+    public async Task GetUpcomingMatchesAsync_未配置赛事筛选时_保持按游戏拉取全量赛程()
+    {
+        RecordingHttpMessageHandler handler = new(SampleMatchListJson);
+        using HttpClient client = new(handler);
+        using MemoryCache cache = new(new MemoryCacheOptions());
+        PandaScoreProvider provider = new(
+            client,
+            cache,
+            new PandaScoreConfig { ApiKey = "token", BaseUrl = "https://example.test", GameSlug = "csgo" },
+            NullLogger<PandaScoreProvider>.Instance);
+
+        await provider.GetUpcomingMatchesAsync("csgo", DateTime.SpecifyKind(new DateTime(2026, 6, 1, 0, 0, 0), DateTimeKind.Utc));
+
+        handler.RequestUris.Should().ContainSingle();
+        handler.RequestUris[0].AbsolutePath.Should().Be("/csgo/matches");
+        handler.RequestUris[0].Query.Should().Contain("filter[status]=not_started");
+    }
+
+    [Fact]
+    public async Task GetUpcomingMatchesAsync_配置赛事筛选时_只请求对应赛事端点且按比赛去重()
+    {
+        RecordingHttpMessageHandler handler = new(SampleMatchListJson);
+        using HttpClient client = new(handler);
+        using MemoryCache cache = new(new MemoryCacheOptions());
+        PandaScoreProvider provider = new(
+            client,
+            cache,
+            new PandaScoreConfig
+            {
+                ApiKey = "token",
+                BaseUrl = "https://example.test",
+                GameSlug = "csgo",
+                LeagueIdsOrSlugs = "league-a, league-b",
+                SerieIdsOrSlugs = "serie-1",
+                TournamentIdsOrSlugs = "tournament-x",
+            },
+            NullLogger<PandaScoreProvider>.Instance);
+
+        IReadOnlyList<ExternalEsportsMatch> matches = await provider.GetUpcomingMatchesAsync(
+            "csgo",
+            DateTime.SpecifyKind(new DateTime(2026, 6, 1, 0, 0, 0), DateTimeKind.Utc));
+
+        matches.Should().ContainSingle("同一场比赛可能同时出现在 league/serie/tournament 端点，入库前必须按 external_id 去重");
+        handler.RequestUris.Select(uri => uri.AbsolutePath).Should().BeEquivalentTo(
+            "/leagues/league-a/matches",
+            "/leagues/league-b/matches",
+            "/series/serie-1/matches",
+            "/tournaments/tournament-x/matches");
+        handler.RequestUris.Should().OnlyContain(uri => !uri.AbsolutePath.StartsWith("/csgo/", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void MapMatch_两队未开赛比赛_映射为外部比赛草稿()
     {
@@ -170,5 +225,37 @@ public class PandaScoreProviderTests
         results[1].ExternalId.Should().Be("2");
         results[1].Winner.Should().Be(1);
         results[1].ResultText.Should().Be("2:1");
+    }
+
+    private const string SampleMatchListJson = """
+    [
+      {
+        "id": 647619,
+        "name": "NAVI vs FaZe",
+        "status": "not_started",
+        "scheduled_at": "2026-06-10T12:00:00Z",
+        "league": { "id": 11, "name": "ESL Pro League" },
+        "serie": { "id": 22, "full_name": "Season 23" },
+        "tournament": { "id": 33, "name": "Group Stage" },
+        "opponents": [
+          { "opponent": { "id": 100, "name": "NAVI" }, "type": "Team" },
+          { "opponent": { "id": 200, "name": "FaZe" }, "type": "Team" }
+        ]
+      }
+    ]
+    """;
+
+    private sealed class RecordingHttpMessageHandler(string responseBody) : HttpMessageHandler
+    {
+        public List<Uri> RequestUris { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestUris.Add(request.RequestUri ?? throw new InvalidOperationException("请求 URI 不能为空。"));
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(responseBody),
+            });
+        }
     }
 }

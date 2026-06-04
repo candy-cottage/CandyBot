@@ -12,6 +12,7 @@ namespace CandyCottage.CandyBot.Utilities
     ///   <item><c>CANDYBOT_SQL_MODE</c>(enum) / <c>CANDYBOT_SQL_DATASOURCE</c> / <c>CANDYBOT_SQL_PORT</c> / <c>CANDYBOT_SQL_DATABASE</c> / <c>CANDYBOT_SQL_USER</c> / <c>CANDYBOT_SQL_PASSWORD</c></item>
     ///   <item><c>CANDYBOT_APITOKENSALT</c></item>
     ///   <item><c>CANDYBOT_DEEPSEEK_ENABLED</c>(bool) / <c>CANDYBOT_DEEPSEEK_APIKEY</c> / <c>CANDYBOT_DEEPSEEK_BASEURL</c> / <c>CANDYBOT_DEEPSEEK_MODEL</c></item>
+    ///   <item><c>CANDYBOT_PANDASCORE_APIKEY</c> / <c>CANDYBOT_PANDASCORE_BASEURL</c> / <c>CANDYBOT_PANDASCORE_GAMESLUG</c> / <c>CANDYBOT_PANDASCORE_LEAGUEIDSORSLUGS</c> / <c>CANDYBOT_PANDASCORE_SERIEIDSORSLUGS</c> / <c>CANDYBOT_PANDASCORE_TOURNAMENTIDSORSLUGS</c></item>
     /// </list>
     /// </summary>
     public static class ConfigEnv
