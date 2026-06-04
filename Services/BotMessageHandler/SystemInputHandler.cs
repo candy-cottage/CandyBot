@@ -38,6 +38,7 @@ public partial class CandyBotService
                 }
 
                 md.Content = userAPITokenService.ShowTokenList(user!.Username);
+                await botService.SendAsync(e, reply);
                 return true;
             }
 
@@ -60,10 +61,11 @@ public partial class CandyBotService
                 }
 
                 md.Content = userAPITokenService.DeleteToken(user!.Username, param);
+                await botService.SendAsync(e, reply);
                 return true;
             }
 
-            if (e.Detail.StartsWith("生成令牌"))
+            if (e.Detail.StartsWith("生成令牌") || e.Detail.StartsWith("创建令牌"))
             {
                 if (!await CheckUser(e, user, false, false))
                 {
@@ -76,7 +78,7 @@ public partial class CandyBotService
                     return true;
                 }
 
-                string name = e.Detail.Replace("生成令牌", "").Trim();
+                string name = e.Detail.Replace("生成令牌", "").Replace("创建令牌", "").Trim();
                 if (name == "")
                 {
                     await botService.SendAsync(e, "未提供令牌名称。");
@@ -107,6 +109,7 @@ public partial class CandyBotService
                             });
                         });
                     }
+                    return true;
                 }
                 else if (result == 2)
                 {

@@ -2,12 +2,13 @@
 using System.Text;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Utilities;
+using Microsoft.Extensions.Caching.Memory;
 using Milimoe.FunGame.Core.Api.Transmittal;
 using Milimoe.FunGame.Core.Api.Utility;
 
 namespace CandyCottage.CandyBot.Services
 {
-    public class UserAPITokenService(ILogger<UserService> logger, SQLHelper sql, CandyBotConfig candyBotConfig)
+    public class UserAPITokenService(ILogger<UserService> logger, SQLHelper sql, CandyBotConfig candyBotConfig, IMemoryCache memoryCache)
     {
         /// <summary>
         /// 0: success, 1: sql error, 2: out of limit, 3: already exists
@@ -43,7 +44,7 @@ namespace CandyCottage.CandyBot.Services
                             return 3;
                         }
 
-                        string tokenId = $"{username}-{Verification.CreateVerifyCode(Milimoe.FunGame.Core.Library.Constant.VerifyCodeType.MixVerifyCode, 6)}";
+                        string tokenId = Encryption.GenerateRandomString(16);
                         secret = $"cd-{Guid.NewGuid():N}";
                         string secretHash = secret.Encrypt(candyBotConfig.ApiTokenSalt);
                         sql.Execute(Milimoe.FunGame.Core.Library.SQLScript.Common.ApiTokens.Insert_APIToken(sql, tokenId, secretHash, username, name));
@@ -71,14 +72,14 @@ namespace CandyCottage.CandyBot.Services
             }
 
             StringBuilder sb = new();
-            sb.AppendLine("🔑 令牌列表");
+            sb.AppendLine($"**🔑 令牌列表** {"生成令牌".CreateCmdInput()}");
             foreach (DataRow dr in sql.DataSet.Tables[0].Rows)
             {
                 string tokenID = dr["TokenID"].ToString() ?? "";
                 string name = dr["Reference2"].ToString() ?? "";
                 sb.AppendLine($"**令牌名称：{name}**");
                 sb.AppendLine($"ID：{tokenID}");
-                sb.AppendLine($"操作：{"删除".CreateCmdInput()}");
+                sb.AppendLine($"操作：{"删除".CreateCmdInput($"删除令牌 {tokenID}")}");
             }
 
             return sb.ToString();
@@ -86,9 +87,23 @@ namespace CandyCottage.CandyBot.Services
 
         public string DeleteToken(string username, string tokenIdOrName)
         {
-            string script = "DELETE FROM ApiTokens WHERE (TokenID = @IdOrName OR Reference2 = @IdOrName) AND Reference1 = @Username";
+            string script = "SELECT SecretKey FROM ApiTokens WHERE (TokenID = @IdOrName OR Reference2 = @IdOrName) AND Reference1 = @Username";
             sql.Parameters["@IdOrName"] = tokenIdOrName;
             sql.Parameters["@Username"] = username;
+            sql.ClearParametersAfterExecute = false;
+            sql.ExecuteDataSet(script);
+            sql.ClearParametersAfterExecute = true;
+            if (!sql.Success)
+            {
+                return $"❌ 服务器错误，删除令牌失败。{"令牌列表".CreateCmdInput()}";
+            }
+
+            foreach (DataRow dr in sql.DataSet.Tables[0].Rows)
+            {
+                string secretKey = dr["SecretKey"].ToString() ?? "";
+                memoryCache.Remove($"api::{secretKey}");
+            }
+            script = "DELETE FROM ApiTokens WHERE (TokenID = @IdOrName OR Reference2 = @IdOrName) AND Reference1 = @Username";
             sql.Execute(script);
             if (sql.Success)
             {

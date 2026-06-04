@@ -35,7 +35,8 @@ namespace CandyCottage.CandyBot.Utilities
             // 进行 token 验证
             string name;
             string role = "user";
-            string cacheKey = $"api::{token}";
+            string hashKey = token.Encrypt(config.ApiTokenSalt);
+            string cacheKey = $"api::{hashKey}";
             if (memoryCache.TryGetValue(cacheKey, out object? value) && value is (string n, string r))
             {
                 name = n;
@@ -44,7 +45,7 @@ namespace CandyCottage.CandyBot.Utilities
             else
             {
                 string query = "Select Users.* From Users Join ApiTokens On ApiTokens.Reference1 = Users.Username Where ApiTokens.SecretKey = @SecretKey";
-                sql.Parameters["@SecretKey"] = token.Encrypt(config.ApiTokenSalt);
+                sql.Parameters["@SecretKey"] = hashKey;
                 DataRow? dr = await sql.ExecuteDataRowAsync(query);
                 if (dr is null)
                 {
