@@ -21,8 +21,8 @@ namespace CandyBot.Tests.Services;
 public class FeatureSwitchCommandTests
 {
     private static CandyBotService CreateService(IBotReplySender botService, CandyBotFunctionConfig cfg, IMemoryCache cache) =>
-        new(NullLogger<CandyBotService>.Instance, cache, sql: null!, cfg, forzaConfig: null!, candyBotConfig: null!, taskQueue: null!, taskManager: null!,
-            botService, bettingService: null!, sqlInitService: null!, userService: null!, forzaService: null!, forzaSheetImporter: null!, esportsSyncService: null!);
+        new(NullLogger<CandyBotService>.Instance, cache, sql: null!, cfg, forzaConfig: null!, taskQueue: null!, taskManager: null!,
+            botService, bettingService: null!, sqlInitService: null!, userService: null!, forzaService: null!, forzaSheetImporter: null!, esportsSyncService: null!, userAPITokenService: null!);
 
     [Fact]
     public async Task 管理员发送关闭地平线_应写入false并回复地平线模块已关闭()

@@ -1,5 +1,4 @@
 ﻿using Microsoft.Data.Sqlite;
-using Milimoe.FunGame.Core.Api.Transmittal;
 using Milimoe.FunGame.Core.Api.Utility;
 using Milimoe.FunGame.Core.Library.Constant;
 using MySql.Data.MySqlClient;
@@ -16,18 +15,6 @@ namespace CandyCottage.CandyBot.Utilities
         public string Password { get; set; } = "";
 
         public PluginConfig SQLConfig { get; set; } = new("sqlconfig", "connection");
-
-        public static SQLHelper NewSQLHelper(IServiceProvider sp)
-        {
-            SQLConnectionConfig config = sp.GetRequiredService<SQLConnectionConfig>();
-            SQLHelper sql = config.Mode switch
-            {
-                SQLMode.MySQL => sp.GetRequiredService<MySQLHelper>(),
-                SQLMode.SQLite => sp.GetRequiredService<SQLiteHelper>(),
-                _ => throw new NotSupportedException($"不支持的数据库模式：{config.Mode}")
-            };
-            return sql;
-        }
 
         public string GetConnectConfigsForMySQL()
         {
