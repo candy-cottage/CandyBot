@@ -63,6 +63,32 @@ public class PandaScoreProviderTests
     }
 
     [Fact]
+    public async Task GetUpcomingMatchesAsync_同一小时内重复调用_命中缓存不重复请求()
+    {
+        RecordingHttpMessageHandler handler = new(SampleMatchListJson);
+        using HttpClient client = new(handler);
+        using MemoryCache cache = new(new MemoryCacheOptions());
+        PandaScoreProvider provider = new(
+            client,
+            cache,
+            new PandaScoreConfig
+            {
+                ApiKey = "token",
+                BaseUrl = "https://example.test",
+                GameSlug = "csgo",
+                LeagueIdsOrSlugs = "league-a",
+            },
+            NullLogger<PandaScoreProvider>.Instance);
+
+        // 调度器与"预览赛事筛选"都传入 DateTime.UtcNow——同一小时内的两次调用必须复用缓存，
+        // 否则每次同步都会对每个作用域重复请求 PandaScore。
+        await provider.GetUpcomingMatchesAsync("csgo", DateTime.SpecifyKind(new DateTime(2026, 6, 1, 10, 5, 17), DateTimeKind.Utc));
+        await provider.GetUpcomingMatchesAsync("csgo", DateTime.SpecifyKind(new DateTime(2026, 6, 1, 10, 25, 42), DateTimeKind.Utc));
+
+        handler.RequestUris.Should().ContainSingle("同一小时内的第二次调用应命中缓存，不再发起 HTTP 请求");
+    }
+
+    [Fact]
     public async Task SearchScopesAsync_按游戏搜索三层赛事候选项()
     {
         RecordingHttpMessageHandler handler = new(SampleScopeListJson);

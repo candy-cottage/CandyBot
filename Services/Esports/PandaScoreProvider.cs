@@ -21,8 +21,10 @@ public sealed class PandaScoreProvider(
             return [];
         }
 
+        // 截断到整点：调用方传入 DateTime.UtcNow，若直接拼入 URL 会让缓存键每次都不同、缓存永不命中。
+        since = since.Date.AddHours(since.Hour);
         IReadOnlyList<string> urls = BuildUpcomingMatchUrls(gameSlug, since);
-        string cacheKey = $"pandascore:upcoming:{gameSlug}:{since:yyyyMMddHH}:{string.Join("|", urls)}";
+        string cacheKey = $"pandascore:upcoming:{gameSlug}:{string.Join("|", urls)}";
         if (cache.TryGetValue(cacheKey, out IReadOnlyList<ExternalEsportsMatch>? cached) && cached is not null)
         {
             return cached;
