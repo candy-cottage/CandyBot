@@ -49,6 +49,67 @@ public sealed class EsportsSyncService(
         return new(matches.Count, eventsCreated, eventsUpdated, matchesCreated, matchesUpdated, failed, errors);
     }
 
+    public async Task<IReadOnlyList<ExternalEsportsScope>> SearchFilterScopesAsync(string keyword, CancellationToken cancellationToken = default)
+    {
+        if (provider is not IEsportsScopeSearchProvider searchProvider)
+        {
+            return [];
+        }
+
+        return await searchProvider.SearchScopesAsync(config.GameSlug, keyword, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ExternalEsportsMatch>> PreviewFilteredMatchesAsync(CancellationToken cancellationToken = default)
+        => await provider.GetUpcomingMatchesAsync(config.GameSlug, DateTime.UtcNow, cancellationToken);
+
+    public (string League, string Serie, string Tournament) GetScopeFilters()
+        => (config.LeagueIdsOrSlugs, config.SerieIdsOrSlugs, config.TournamentIdsOrSlugs);
+
+    /// <summary>作用域筛选是否由环境变量锁定。锁定期间 Add/Remove/Clear 均拒绝，避免把 env 注入值写盘。</summary>
+    public bool ScopeFiltersLockedByEnv => config.ScopeFiltersLockedByEnv;
+
+    public bool AddScopeFilter(string scopeType, string value)
+    {
+        string normalizedType = NormalizeScopeType(scopeType);
+        if (config.ScopeFiltersLockedByEnv || string.IsNullOrWhiteSpace(normalizedType) || string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        SetScopeFilters(normalizedType, AddScopeValue(GetScopeFilter(normalizedType), value));
+        return true;
+    }
+
+    public bool RemoveScopeFilter(string scopeType, string value)
+    {
+        string normalizedType = NormalizeScopeType(scopeType);
+        if (config.ScopeFiltersLockedByEnv || string.IsNullOrWhiteSpace(normalizedType) || string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        SetScopeFilters(normalizedType, RemoveScopeValue(GetScopeFilter(normalizedType), value));
+        return true;
+    }
+
+    public void ClearScopeFilters()
+    {
+        if (config.ScopeFiltersLockedByEnv) return;
+        config.LeagueIdsOrSlugs = "";
+        config.SerieIdsOrSlugs = "";
+        config.TournamentIdsOrSlugs = "";
+        config.PersistScopeFilters();
+    }
+
+    public static string NormalizeScopeType(string scopeType)
+        => scopeType.Trim().ToLowerInvariant() switch
+        {
+            "league" or "leagues" or "联赛" => "league",
+            "serie" or "series" or "赛季" or "届次" => "serie",
+            "tournament" or "tournaments" or "阶段" or "锦标赛" => "tournament",
+            _ => "",
+        };
+
     /// <summary>
     /// 半自动结算的第一步：把外部数据源已终结的<b>已发布胜负比赛</b>结果（result/winner）预填进表，
     /// 并置 <c>pending_settlement=1</c> 等待管理员二次确认结算——<b>不</b>动金钱、<b>不</b>把 <c>status</c> 改为 2（已结束）。
@@ -211,4 +272,48 @@ public sealed class EsportsSyncService(
         // TODO(debt): wire PandaScore Odds product fields once the account has confirmed odds API access.
         return bettingService.CalculateOdds(0.5m);
     }
+
+    private string GetScopeFilter(string normalizedType)
+        => normalizedType switch
+        {
+            "league" => config.LeagueIdsOrSlugs,
+            "serie" => config.SerieIdsOrSlugs,
+            "tournament" => config.TournamentIdsOrSlugs,
+            _ => "",
+        };
+
+    private void SetScopeFilters(string normalizedType, string value)
+    {
+        switch (normalizedType)
+        {
+            case "league":
+                config.LeagueIdsOrSlugs = value;
+                break;
+            case "serie":
+                config.SerieIdsOrSlugs = value;
+                break;
+            case "tournament":
+                config.TournamentIdsOrSlugs = value;
+                break;
+        }
+        config.PersistScopeFilters();
+    }
+
+    private static string AddScopeValue(string existing, string value)
+    {
+        List<string> values = SplitScopeValues(existing).ToList();
+        if (!values.Contains(value, StringComparer.OrdinalIgnoreCase))
+        {
+            values.Add(value.Trim());
+        }
+        return string.Join(",", values);
+    }
+
+    private static string RemoveScopeValue(string existing, string value)
+        => string.Join(",", SplitScopeValues(existing).Where(v => !string.Equals(v, value.Trim(), StringComparison.OrdinalIgnoreCase)));
+
+    private static IEnumerable<string> SplitScopeValues(string values)
+        => values
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(v => !string.IsNullOrWhiteSpace(v));
 }

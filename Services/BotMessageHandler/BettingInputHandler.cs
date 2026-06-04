@@ -1,5 +1,7 @@
 ﻿using CandyCottage.CandyBot.Models;
+using CandyCottage.CandyBot.Services.Esports;
 using CandyCottage.CandyBot.Utilities;
+using Microsoft.Extensions.Caching.Memory;
 using Milimoe.FunGame.Core.Entity;
 using Milimoe.FunGame.Core.Library.Constant;
 using ProjectRedbud.FunGame.SQLQueryExtension;
@@ -9,6 +11,7 @@ namespace CandyCottage.CandyBot.Services;
 public partial class CandyBotService
 {
     private static string[] CheckDateTimeFormat { get; } = ["yyyy-MM-dd HH:mm", "yyyy-MM-dd"];
+    private const int EsportsScopeSearchCacheMinutes = 30;
 
     public async Task<bool> HandleBettingInput(IBotMessage e, User? user)
     {
@@ -48,6 +51,11 @@ public partial class CandyBotService
             }
             reply.Keyboard = new KeyboardMessage().AppendButtons(2, buttons);
             await botService.SendAsync(e, reply);
+            return true;
+        }
+
+        if (await HandleBettingScopeFilterInput(e, user))
+        {
             return true;
         }
 
@@ -932,4 +940,228 @@ public partial class CandyBotService
 
         return false;
     }
+
+    private async Task<bool> HandleBettingScopeFilterInput(IBotMessage e, User? user)
+    {
+        string detail = e.Detail.Trim();
+        bool isScopeCommand = detail == "赛事筛选帮助"
+            || detail == "查看赛事筛选"
+            || detail.StartsWith("搜索赛事筛选")
+            || detail.StartsWith("添加赛事筛选")
+            || detail.StartsWith("移除赛事筛选")
+            || detail == "清空赛事筛选"
+            || detail == "预览赛事筛选";
+        if (!isScopeCommand)
+        {
+            return false;
+        }
+
+        if (!await CheckUser(e, user, false)) return true;
+
+        // 环境变量锁定期间拒绝全部修改类指令：此时内存中的筛选含 env 注入值，写盘会违反配置契约。
+        bool isMutationCommand = detail.StartsWith("添加赛事筛选") || detail.StartsWith("移除赛事筛选") || detail == "清空赛事筛选";
+        if (isMutationCommand && esportsSyncService.ScopeFiltersLockedByEnv)
+        {
+            await botService.SendAsync(e, "赛事筛选当前由环境变量锁定（CANDYBOT_PANDASCORE_*IDSORSLUGS），无法在线修改。请调整环境变量后重启服务。");
+            return true;
+        }
+
+        if (detail == "赛事筛选帮助")
+        {
+            await botService.SendAsync(e,
+                "赛事筛选指令：\n" +
+                "搜索赛事筛选 <关键词>\n" +
+                "添加赛事筛选 <序号>\n" +
+                "添加赛事筛选 <league|serie|tournament> <id或slug>\n" +
+                "移除赛事筛选 <league|serie|tournament> <id或slug>\n" +
+                "查看赛事筛选\n" +
+                "清空赛事筛选\n" +
+                "预览赛事筛选");
+            return true;
+        }
+
+        if (detail == "查看赛事筛选")
+        {
+            await botService.SendAsync(e, RenderScopeFilters());
+            return true;
+        }
+
+        if (detail.StartsWith("搜索赛事筛选"))
+        {
+            string keyword = detail["搜索赛事筛选".Length..].Trim();
+            if (string.IsNullOrWhiteSpace(keyword))
+            {
+                await botService.SendAsync(e, "格式：搜索赛事筛选 <关键词>\n示例：搜索赛事筛选 blast");
+                return true;
+            }
+
+            IReadOnlyList<ExternalEsportsScope> scopes = await esportsSyncService.SearchFilterScopesAsync(keyword);
+            memoryCache.Set(ScopeSearchCacheKey(e), scopes, TimeSpan.FromMinutes(EsportsScopeSearchCacheMinutes));
+            await botService.SendAsync(e, RenderScopeSearchResults(keyword, scopes));
+            return true;
+        }
+
+        if (detail.StartsWith("添加赛事筛选"))
+        {
+            await HandleAddScopeFilter(e, detail["添加赛事筛选".Length..].Trim());
+            return true;
+        }
+
+        if (detail.StartsWith("移除赛事筛选"))
+        {
+            await HandleRemoveScopeFilter(e, detail["移除赛事筛选".Length..].Trim());
+            return true;
+        }
+
+        if (detail == "清空赛事筛选")
+        {
+            esportsSyncService.ClearScopeFilters();
+            await botService.SendAsync(e, "已清空赛事筛选。");
+            return true;
+        }
+
+        if (detail == "预览赛事筛选")
+        {
+            if (!WillGoOn(functionConfig.BettingAutomation, user))
+            {
+                await botService.SendAsync(e, "赛事自动化正在维护，请稍后再试。");
+                return true;
+            }
+
+            try
+            {
+                IReadOnlyList<ExternalEsportsMatch> matches = await esportsSyncService.PreviewFilteredMatchesAsync();
+                await botService.SendAsync(e, RenderScopePreview(matches));
+            }
+            catch (Exception ex)
+            {
+                await botService.SendAsync(e, $"预览赛事筛选遇到错误：{ex.Message}");
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    private async Task HandleAddScopeFilter(IBotMessage e, string argument)
+    {
+        if (string.IsNullOrWhiteSpace(argument))
+        {
+            await botService.SendAsync(e, "格式：添加赛事筛选 <序号>\n或：添加赛事筛选 <league|serie|tournament> <id或slug>");
+            return;
+        }
+
+        ExternalEsportsScope? selected = null;
+        if (int.TryParse(argument, out int index))
+        {
+            if (!memoryCache.TryGetValue(ScopeSearchCacheKey(e), out IReadOnlyList<ExternalEsportsScope>? cached) || cached is null)
+            {
+                await botService.SendAsync(e, "请先发送：搜索赛事筛选 <关键词>");
+                return;
+            }
+
+            selected = cached.ElementAtOrDefault(index - 1);
+            if (selected is null)
+            {
+                await botService.SendAsync(e, $"搜索结果中没有序号 {index}。");
+                return;
+            }
+        }
+        else
+        {
+            string[] parts = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length < 2)
+            {
+                await botService.SendAsync(e, "格式：添加赛事筛选 <league|serie|tournament> <id或slug>");
+                return;
+            }
+            string type = EsportsSyncService.NormalizeScopeType(parts[0]);
+            selected = new(type, parts[1], parts[1]);
+        }
+
+        if (string.IsNullOrWhiteSpace(selected.Type) || !esportsSyncService.AddScopeFilter(selected.Type, selected.Value))
+        {
+            await botService.SendAsync(e, "赛事筛选类型必须是 league、serie 或 tournament。");
+            return;
+        }
+
+        await botService.SendAsync(e, $"已添加赛事筛选：{selected.Type} {selected.Value}\n{RenderScopeFilters()}");
+    }
+
+    private async Task HandleRemoveScopeFilter(IBotMessage e, string argument)
+    {
+        string[] parts = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length < 2)
+        {
+            await botService.SendAsync(e, "格式：移除赛事筛选 <league|serie|tournament> <id或slug>");
+            return;
+        }
+
+        string type = EsportsSyncService.NormalizeScopeType(parts[0]);
+        if (string.IsNullOrWhiteSpace(type) || !esportsSyncService.RemoveScopeFilter(type, parts[1]))
+        {
+            await botService.SendAsync(e, "赛事筛选类型必须是 league、serie 或 tournament。");
+            return;
+        }
+
+        await botService.SendAsync(e, $"已移除赛事筛选：{type} {parts[1]}\n{RenderScopeFilters()}");
+    }
+
+    private string RenderScopeFilters()
+    {
+        var (league, serie, tournament) = esportsSyncService.GetScopeFilters();
+        return "当前赛事筛选：\n" +
+            $"league: {RenderScopeValue(league)}\n" +
+            $"serie: {RenderScopeValue(serie)}\n" +
+            $"tournament: {RenderScopeValue(tournament)}";
+    }
+
+    private static string RenderScopeValue(string value)
+    {
+        string[] values = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return values.Length == 0 ? "未设置" : string.Join(", ", values);
+    }
+
+    private static string RenderScopeSearchResults(string keyword, IReadOnlyList<ExternalEsportsScope> scopes)
+    {
+        if (scopes.Count == 0)
+        {
+            return $"未找到赛事筛选候选项：{keyword}";
+        }
+
+        List<string> lines = [$"搜索结果：{keyword}"];
+        for (int i = 0; i < scopes.Count; i++)
+        {
+            ExternalEsportsScope scope = scopes[i];
+            lines.Add($"{i + 1}. [{scope.Type}] {scope.Name}");
+            string parent = string.IsNullOrWhiteSpace(scope.ParentName) ? "" : $" parent={scope.ParentName}";
+            string id = scope.Id.HasValue ? $" id={scope.Id}" : "";
+            lines.Add($"   value={scope.Value}{id}{parent}");
+            lines.Add($"   添加：添加赛事筛选 {i + 1}");
+        }
+        return string.Join('\n', lines);
+    }
+
+    private static string RenderScopePreview(IReadOnlyList<ExternalEsportsMatch> matches)
+    {
+        if (matches.Count == 0)
+        {
+            return "当前筛选没有可抓取的未开始比赛。";
+        }
+
+        List<string> lines = [$"当前筛选可抓取 {matches.Count} 场未开始比赛："];
+        foreach (ExternalEsportsMatch match in matches.OrderBy(m => m.StartTime).Take(5))
+        {
+            DateTime start = ChinaStandardTime.FromUtc(match.StartTime);
+            lines.Add($"{start:yyyy-MM-dd HH:mm} {match.Team1Name} vs {match.Team2Name} [{match.Stage}]");
+        }
+        if (matches.Count > 5)
+        {
+            lines.Add($"还有 {matches.Count - 5} 场未显示。");
+        }
+        return string.Join('\n', lines);
+    }
+
+    private static string ScopeSearchCacheKey(IBotMessage e)
+        => $"pandascore:scope-search:last:{e.AuthorOpenId}";
 }

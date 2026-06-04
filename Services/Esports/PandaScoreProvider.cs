@@ -11,7 +11,7 @@ public sealed class PandaScoreProvider(
     HttpClient httpClient,
     IMemoryCache cache,
     PandaScoreConfig config,
-    ILogger<PandaScoreProvider> logger) : IEsportsDataProvider
+    ILogger<PandaScoreProvider> logger) : IEsportsDataProvider, IEsportsScopeSearchProvider
 {
     public async Task<IReadOnlyList<ExternalEsportsMatch>> GetUpcomingMatchesAsync(string gameSlug, DateTime since, CancellationToken cancellationToken = default)
     {
@@ -21,21 +21,47 @@ public sealed class PandaScoreProvider(
             return [];
         }
 
-        string cacheKey = $"pandascore:upcoming:{gameSlug}:{since:yyyyMMddHH}";
+        // 截断到整点：调用方传入 DateTime.UtcNow，若直接拼入 URL 会让缓存键每次都不同、缓存永不命中。
+        since = since.Date.AddHours(since.Hour);
+        List<string> urls = BuildUpcomingMatchUrls(gameSlug, since);
+        string cacheKey = $"pandascore:upcoming:{gameSlug}:{string.Join("|", urls)}";
         if (cache.TryGetValue(cacheKey, out IReadOnlyList<ExternalEsportsMatch>? cached) && cached is not null)
         {
             return cached;
         }
 
-        string url = $"{config.BaseUrl.TrimEnd('/')}/{gameSlug}/matches?filter[status]=not_started&range[scheduled_at]={Uri.EscapeDataString(since.ToString("O"))},{Uri.EscapeDataString(since.AddDays(30).ToString("O"))}&sort=scheduled_at&page[size]=100";
-        using HttpRequestMessage request = new(HttpMethod.Get, url);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
+        // 批量韧性：单个失效/误填的作用域（如 404）只跳过并告警，不中断其余作用域；
+        // 全部失败则视为整体故障，抛出让调度器重试，避免缓存空结果掩盖故障。
+        List<ExternalEsportsMatch> result = [];
+        List<Exception> failures = [];
+        foreach (string url in urls)
+        {
+            using HttpRequestMessage request = new(HttpMethod.Get, url);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
 
-        string json = await SendAsync(request, cancellationToken);
-        List<ExternalEsportsMatch> result = PandaScoreMapper.MapMatches(json);
-        cache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
-        return result;
+            try
+            {
+                string json = await SendAsync(request, cancellationToken);
+                result.AddRange(PandaScoreMapper.MapMatches(json));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failures.Add(ex);
+                logger.LogWarning(ex, "拉取赛程作用域失败，跳过该作用域: {Url}", url);
+            }
+        }
+
+        if (failures.Count == urls.Count)
+        {
+            throw new AggregateException($"全部 {urls.Count} 个赛程作用域拉取失败。", failures);
+        }
+
+        // 同一场比赛可能同时属于 league/serie/tournament 作用域，入库前按外部比赛 ID 合并。
+        IReadOnlyList<ExternalEsportsMatch> unique = urls.Count == 1 ? result : [.. result.GroupBy(match => match.ExternalId).
+            Select(group => group.First()).OrderBy(match => match.StartTime)];
+        cache.Set(cacheKey, unique, TimeSpan.FromMinutes(5));
+        return unique;
     }
 
     public async Task<IReadOnlyList<ExternalEsportsResult>> GetFinishedResultsAsync(IReadOnlyCollection<string> externalIds, CancellationToken cancellationToken = default)
@@ -62,13 +88,45 @@ public sealed class PandaScoreProvider(
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
 
             string json = await SendAsync(request, cancellationToken);
-            List<ExternalEsportsResult> batchResults = PandaScoreMapper.MapResults(json)
-                .Where(result => result.Winner is 1 or 2)
-                .ToList();
+            List<ExternalEsportsResult> batchResults = [.. PandaScoreMapper.MapResults(json).Where(result => result.Winner is 1 or 2)];
             cache.Set(cacheKey, batchResults, TimeSpan.FromMinutes(15));
             results.AddRange(batchResults);
         }
         return results;
+    }
+
+    public async Task<IReadOnlyList<ExternalEsportsScope>> SearchScopesAsync(string gameSlug, string keyword, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(config.ApiKey) || string.IsNullOrWhiteSpace(keyword))
+        {
+            return [];
+        }
+
+        string cacheKey = $"pandascore:scope-search:{gameSlug}:{keyword.Trim().ToLowerInvariant()}";
+        if (cache.TryGetValue(cacheKey, out IReadOnlyList<ExternalEsportsScope>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        List<ExternalEsportsScope> result = [];
+        string baseUrl = config.BaseUrl.TrimEnd('/');
+        string query = $"search[name]={Uri.EscapeDataString(keyword.Trim())}&page[size]=5";
+        foreach ((string type, string resource) in new[] { ("league", "{game}/leagues"), ("serie", "{game}/series"), ("tournament", "{game}/tournaments") })
+        {
+            string path = resource.Replace("{game}", Uri.EscapeDataString(gameSlug), StringComparison.Ordinal);
+            string url = $"{baseUrl}/{path}?{query}";
+            using HttpRequestMessage request = new(HttpMethod.Get, url);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
+
+            string json = await SendAsync(request, cancellationToken);
+            result.AddRange(PandaScoreMapper.MapScopes(json, type));
+        }
+
+        IReadOnlyList<ExternalEsportsScope> scopes = [.. result.GroupBy(scope => (scope.Type, scope.Value), StringTupleComparer.OrdinalIgnoreCase).
+            Select(group => group.First()).Take(10)];
+        cache.Set(cacheKey, scopes, TimeSpan.FromMinutes(10));
+        return scopes;
     }
 
     private async Task<string> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -77,6 +135,43 @@ public sealed class PandaScoreProvider(
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsStringAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// 有赛事作用域配置时改用 PandaScore 层级端点；未配置时保持原有按游戏全量拉取。
+    /// </summary>
+    private List<string> BuildUpcomingMatchUrls(string gameSlug, DateTime since)
+    {
+        string baseUrl = config.BaseUrl.TrimEnd('/');
+        string query = BuildUpcomingMatchQuery(since);
+        List<string> urls = [];
+        AddScopedMatchUrls(urls, baseUrl, "leagues", config.LeagueIdsOrSlugs, query);
+        AddScopedMatchUrls(urls, baseUrl, "series", config.SerieIdsOrSlugs, query);
+        AddScopedMatchUrls(urls, baseUrl, "tournaments", config.TournamentIdsOrSlugs, query);
+
+        if (urls.Count == 0)
+        {
+            urls.Add($"{baseUrl}/{Uri.EscapeDataString(gameSlug)}/matches?{query}");
+        }
+
+        return urls;
+    }
+
+    private static string BuildUpcomingMatchQuery(DateTime since)
+        => $"filter[status]=not_started&range[scheduled_at]={Uri.EscapeDataString(since.ToString("O"))},{Uri.EscapeDataString(since.AddDays(30).ToString("O"))}&sort=scheduled_at&page[size]=100";
+
+    private static void AddScopedMatchUrls(List<string> urls, string baseUrl, string resource, string configuredScopes, string query)
+    {
+        foreach (string scope in SplitScopes(configuredScopes))
+        {
+            urls.Add($"{baseUrl}/{resource}/{Uri.EscapeDataString(scope)}/matches?{query}");
+        }
+    }
+
+    private static IEnumerable<string> SplitScopes(string configuredScopes)
+        => configuredScopes
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(scope => !string.IsNullOrWhiteSpace(scope))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 }
 
 internal static class PandaScoreMapper
@@ -98,6 +193,12 @@ internal static class PandaScoreMapper
     public static List<ExternalEsportsResult> MapResults(string json)
         => JsonSerializer.Deserialize<List<PandaScoreMatch>>(json, Options)?
             .Select(MapResult)
+            .ToList() ?? [];
+
+    public static List<ExternalEsportsScope> MapScopes(string json, string type)
+        => JsonSerializer.Deserialize<List<PandaScoreScopeEntity>>(json, Options)?
+            .Select(scope => MapScope(scope, type))
+            .Where(scope => !string.IsNullOrWhiteSpace(scope.Value))
             .ToList() ?? [];
 
     private static ExternalEsportsMatch MapMatch(PandaScoreMatch source)
@@ -141,6 +242,31 @@ internal static class PandaScoreMapper
         int score2 = (source.Results ?? []).FirstOrDefault(r => r.TeamId == team2Id)?.Score ?? 0;
         return new(source.Id.ToString(), $"{score1}:{score2}", winner);
     }
+
+    private static ExternalEsportsScope MapScope(PandaScoreScopeEntity source, string type)
+    {
+        string name = source.FullName ?? source.Name ?? "";
+        string value = !string.IsNullOrWhiteSpace(source.Slug) ? source.Slug! : source.Id?.ToString() ?? "";
+        string? parent = type switch
+        {
+            "serie" => source.League?.Name,
+            "tournament" => source.Serie?.FullName ?? source.Serie?.Name ?? source.League?.Name,
+            _ => null,
+        };
+        return new(type, name, value, source.Id, parent);
+    }
+}
+
+internal sealed class StringTupleComparer : IEqualityComparer<(string Type, string Value)>
+{
+    public static StringTupleComparer OrdinalIgnoreCase { get; } = new();
+
+    public bool Equals((string Type, string Value) x, (string Type, string Value) y)
+        => string.Equals(x.Type, y.Type, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Value, y.Value, StringComparison.OrdinalIgnoreCase);
+
+    public int GetHashCode((string Type, string Value) obj)
+        => HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Type), StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Value));
 }
 
 internal sealed record PandaScoreMatch(
@@ -177,3 +303,11 @@ internal sealed record PandaScoreOpponent(
 internal sealed record PandaScoreResult(
     [property: JsonPropertyName("team_id")] long? TeamId,
     [property: JsonPropertyName("score")] int Score);
+
+internal sealed record PandaScoreScopeEntity(
+    [property: JsonPropertyName("id")] long? Id,
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("slug")] string? Slug,
+    [property: JsonPropertyName("full_name")] string? FullName,
+    [property: JsonPropertyName("league")] PandaScoreNamedEntity? League,
+    [property: JsonPropertyName("serie")] PandaScoreSerie? Serie);
