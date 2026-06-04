@@ -16,6 +16,13 @@ public class PandaScoreConfig
     public PluginConfig Config { get; set; } = new("candybot", "pandascore");
 
     /// <summary>
+    /// 作用域筛选是否由环境变量锁定（任一 *IDSORSLUGS 环境变量生效即锁定）。
+    /// 锁定期间禁止在线修改筛选：此时属性持有 env 注入值，
+    /// 任何 <see cref="PersistScopeFilters"/> 都会把这些值写盘，违反"环境变量覆盖仅内存生效"的契约。
+    /// </summary>
+    public bool ScopeFiltersLockedByEnv { get; private set; }
+
+    /// <summary>
     /// 优先级：环境变量 &gt; PluginConfig &gt; 默认值。环境变量：
     /// CANDYBOT_PANDASCORE_APIKEY / CANDYBOT_PANDASCORE_BASEURL / CANDYBOT_PANDASCORE_GAMESLUG /
     /// CANDYBOT_PANDASCORE_LEAGUEIDSORSLUGS / CANDYBOT_PANDASCORE_SERIEIDSORSLUGS /
@@ -24,6 +31,7 @@ public class PandaScoreConfig
     /// LeagueIdsOrSlugs / SerieIdsOrSlugs / TournamentIdsOrSlugs 为逗号分隔列表；
     /// 任一项非空时，赛程同步只拉取对应赛事范围的比赛。
     /// 环境变量覆盖仅作用于内存，不写回配置文件。轮询间隔下限为 1 分钟。
+    /// 任一 *IDSORSLUGS 环境变量生效时 <see cref="ScopeFiltersLockedByEnv"/> 为 true，在线修改筛选被整体拒绝。
     /// </summary>
     public void Init()
     {
@@ -45,6 +53,10 @@ public class PandaScoreConfig
         LeagueIdsOrSlugs = ConfigEnv.Override("CANDYBOT_PANDASCORE_LEAGUEIDSORSLUGS", LeagueIdsOrSlugs);
         SerieIdsOrSlugs = ConfigEnv.Override("CANDYBOT_PANDASCORE_SERIEIDSORSLUGS", SerieIdsOrSlugs);
         TournamentIdsOrSlugs = ConfigEnv.Override("CANDYBOT_PANDASCORE_TOURNAMENTIDSORSLUGS", TournamentIdsOrSlugs);
+        // PersistScopeFilters 写盘时三个字段一起写，故任一 env 生效就整体锁定在线修改。
+        ScopeFiltersLockedByEnv = ConfigEnv.IsSet("CANDYBOT_PANDASCORE_LEAGUEIDSORSLUGS")
+            || ConfigEnv.IsSet("CANDYBOT_PANDASCORE_SERIEIDSORSLUGS")
+            || ConfigEnv.IsSet("CANDYBOT_PANDASCORE_TOURNAMENTIDSORSLUGS");
         scheduleMinutes = ConfigEnv.Override("CANDYBOT_PANDASCORE_SCHEDULEPOLLINTERVALMINUTES", scheduleMinutes);
         resultMinutes = ConfigEnv.Override("CANDYBOT_PANDASCORE_RESULTPOLLINTERVALMINUTES", resultMinutes);
 
@@ -54,6 +66,8 @@ public class PandaScoreConfig
 
     public void PersistScopeFilters()
     {
+        // 兜底护栏：锁定期间属性持有 env 注入值，绝不能写回配置文件（调用方应先行拒绝）。
+        if (ScopeFiltersLockedByEnv) return;
         Config["LeagueIdsOrSlugs"] = LeagueIdsOrSlugs;
         Config["SerieIdsOrSlugs"] = SerieIdsOrSlugs;
         Config["TournamentIdsOrSlugs"] = TournamentIdsOrSlugs;

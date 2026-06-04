@@ -17,6 +17,10 @@ namespace CandyCottage.CandyBot.Utilities
     /// </summary>
     public static class ConfigEnv
     {
+        /// <summary>环境变量已设置且非空白（即会触发覆盖）时返回 true。</summary>
+        public static bool IsSet(string envName)
+            => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(envName));
+
         /// <summary>环境变量已设置且非空白时返回其值，否则返回 <paramref name="current"/>。</summary>
         public static string Override(string envName, string current)
         {

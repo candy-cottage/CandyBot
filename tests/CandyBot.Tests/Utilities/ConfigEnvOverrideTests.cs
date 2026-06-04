@@ -255,4 +255,41 @@ public class ConfigEnvOverrideTests
             (reloaded.GetOrAdd("LeagueIdsOrSlugs", "") ?? "").Should().Be("league-disk");
         });
     }
+
+    [Fact]
+    public void PandaScoreConfig_任一作用域筛选环境变量生效时标记锁定()
+    {
+        WithEnvAndTempRoot(new Dictionary<string, string?>
+        {
+            ["CANDYBOT_PANDASCORE_LEAGUEIDSORSLUGS"] = "league-env",
+            ["CANDYBOT_PANDASCORE_SERIEIDSORSLUGS"] = null,
+            ["CANDYBOT_PANDASCORE_TOURNAMENTIDSORSLUGS"] = null,
+        }, () =>
+        {
+            PandaScoreConfig config = new();
+            config.Init();
+
+            // PersistScopeFilters 会把三个字段一起写盘，因此只要任一 env 生效就必须整体锁定，
+            // 否则在线修改其他字段也会把 env 注入值落盘。
+            config.ScopeFiltersLockedByEnv.Should().BeTrue();
+        });
+    }
+
+    [Fact]
+    public void PandaScoreConfig_无作用域筛选环境变量时不锁定()
+    {
+        WithEnvAndTempRoot(new Dictionary<string, string?>
+        {
+            ["CANDYBOT_PANDASCORE_APIKEY"] = "env-key",
+            ["CANDYBOT_PANDASCORE_LEAGUEIDSORSLUGS"] = null,
+            ["CANDYBOT_PANDASCORE_SERIEIDSORSLUGS"] = null,
+            ["CANDYBOT_PANDASCORE_TOURNAMENTIDSORSLUGS"] = null,
+        }, () =>
+        {
+            PandaScoreConfig config = new();
+            config.Init();
+
+            config.ScopeFiltersLockedByEnv.Should().BeFalse("其他环境变量（如 ApiKey）不应锁定作用域筛选");
+        });
+    }
 }

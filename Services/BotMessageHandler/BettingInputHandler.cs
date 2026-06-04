@@ -958,6 +958,14 @@ public partial class CandyBotService
 
         if (!await CheckUser(e, user, false)) return true;
 
+        // 环境变量锁定期间拒绝全部修改类指令：此时内存中的筛选含 env 注入值，写盘会违反配置契约。
+        bool isMutationCommand = detail.StartsWith("添加赛事筛选") || detail.StartsWith("移除赛事筛选") || detail == "清空赛事筛选";
+        if (isMutationCommand && esportsSyncService.ScopeFiltersLockedByEnv)
+        {
+            await botService.SendAsync(e, "赛事筛选当前由环境变量锁定（CANDYBOT_PANDASCORE_*IDSORSLUGS），无法在线修改。请调整环境变量后重启服务。");
+            return true;
+        }
+
         if (detail == "赛事筛选帮助")
         {
             await botService.SendAsync(e,

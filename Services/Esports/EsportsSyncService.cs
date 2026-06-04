@@ -65,10 +65,13 @@ public sealed class EsportsSyncService(
     public (string League, string Serie, string Tournament) GetScopeFilters()
         => (config.LeagueIdsOrSlugs, config.SerieIdsOrSlugs, config.TournamentIdsOrSlugs);
 
+    /// <summary>作用域筛选是否由环境变量锁定。锁定期间 Add/Remove/Clear 均拒绝，避免把 env 注入值写盘。</summary>
+    public bool ScopeFiltersLockedByEnv => config.ScopeFiltersLockedByEnv;
+
     public bool AddScopeFilter(string scopeType, string value)
     {
         string normalizedType = NormalizeScopeType(scopeType);
-        if (string.IsNullOrWhiteSpace(normalizedType) || string.IsNullOrWhiteSpace(value))
+        if (config.ScopeFiltersLockedByEnv || string.IsNullOrWhiteSpace(normalizedType) || string.IsNullOrWhiteSpace(value))
         {
             return false;
         }
@@ -80,7 +83,7 @@ public sealed class EsportsSyncService(
     public bool RemoveScopeFilter(string scopeType, string value)
     {
         string normalizedType = NormalizeScopeType(scopeType);
-        if (string.IsNullOrWhiteSpace(normalizedType) || string.IsNullOrWhiteSpace(value))
+        if (config.ScopeFiltersLockedByEnv || string.IsNullOrWhiteSpace(normalizedType) || string.IsNullOrWhiteSpace(value))
         {
             return false;
         }
@@ -91,6 +94,7 @@ public sealed class EsportsSyncService(
 
     public void ClearScopeFilters()
     {
+        if (config.ScopeFiltersLockedByEnv) return;
         config.LeagueIdsOrSlugs = "";
         config.SerieIdsOrSlugs = "";
         config.TournamentIdsOrSlugs = "";
