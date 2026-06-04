@@ -89,6 +89,67 @@ public class PandaScoreProviderTests
     }
 
     [Fact]
+    public async Task GetUpcomingMatchesAsync_单个作用域请求失败_不影响其他作用域()
+    {
+        // 失效/误填的筛选（PandaScore 404）只应跳过该作用域并记录告警，
+        // 不得中断整轮同步——否则一个坏筛选会阻塞全部比赛导入。
+        RecordingHttpMessageHandler handler = new(SampleMatchListJson)
+        {
+            PathStatusOverrides = { ["/leagues/bad-league/matches"] = System.Net.HttpStatusCode.NotFound },
+        };
+        using HttpClient client = new(handler);
+        using MemoryCache cache = new(new MemoryCacheOptions());
+        PandaScoreProvider provider = new(
+            client,
+            cache,
+            new PandaScoreConfig
+            {
+                ApiKey = "token",
+                BaseUrl = "https://example.test",
+                GameSlug = "csgo",
+                LeagueIdsOrSlugs = "bad-league,good-league",
+            },
+            NullLogger<PandaScoreProvider>.Instance);
+
+        IReadOnlyList<ExternalEsportsMatch> matches = await provider.GetUpcomingMatchesAsync(
+            "csgo",
+            DateTime.SpecifyKind(new DateTime(2026, 6, 1, 0, 0, 0), DateTimeKind.Utc));
+
+        matches.Should().ContainSingle("好作用域的比赛应正常返回，坏作用域只被跳过");
+        handler.RequestUris.Should().HaveCount(2, "坏作用域失败后仍应继续请求剩余作用域");
+    }
+
+    [Fact]
+    public async Task GetUpcomingMatchesAsync_全部作用域请求失败_抛出异常()
+    {
+        // 全部失败说明是整体故障（如 API 不可用），必须抛出让调度器按原节律重试，
+        // 而不是缓存一份空结果掩盖故障。
+        RecordingHttpMessageHandler handler = new(SampleMatchListJson)
+        {
+            PathStatusOverrides = { ["/leagues/bad-league/matches"] = System.Net.HttpStatusCode.NotFound },
+        };
+        using HttpClient client = new(handler);
+        using MemoryCache cache = new(new MemoryCacheOptions());
+        PandaScoreProvider provider = new(
+            client,
+            cache,
+            new PandaScoreConfig
+            {
+                ApiKey = "token",
+                BaseUrl = "https://example.test",
+                GameSlug = "csgo",
+                LeagueIdsOrSlugs = "bad-league",
+            },
+            NullLogger<PandaScoreProvider>.Instance);
+
+        Func<Task> act = () => provider.GetUpcomingMatchesAsync(
+            "csgo",
+            DateTime.SpecifyKind(new DateTime(2026, 6, 1, 0, 0, 0), DateTimeKind.Utc));
+
+        await act.Should().ThrowAsync<Exception>("全部作用域失败不应被静默吞掉");
+    }
+
+    [Fact]
     public async Task SearchScopesAsync_按游戏搜索三层赛事候选项()
     {
         RecordingHttpMessageHandler handler = new(SampleScopeListJson);
@@ -315,12 +376,17 @@ public class PandaScoreProviderTests
     {
         public List<Uri> RequestUris { get; } = [];
 
+        /// <summary>按请求路径覆盖响应状态码（如模拟某个作用域 404），未命中的路径返回 200 + responseBody。</summary>
+        public Dictionary<string, System.Net.HttpStatusCode> PathStatusOverrides { get; init; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            RequestUris.Add(request.RequestUri ?? throw new InvalidOperationException("请求 URI 不能为空。"));
-            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            Uri uri = request.RequestUri ?? throw new InvalidOperationException("请求 URI 不能为空。");
+            RequestUris.Add(uri);
+            System.Net.HttpStatusCode status = PathStatusOverrides.GetValueOrDefault(uri.AbsolutePath, System.Net.HttpStatusCode.OK);
+            return Task.FromResult(new HttpResponseMessage(status)
             {
-                Content = new StringContent(responseBody),
+                Content = new StringContent(status == System.Net.HttpStatusCode.OK ? responseBody : ""),
             });
         }
     }

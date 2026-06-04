@@ -30,15 +30,31 @@ public sealed class PandaScoreProvider(
             return cached;
         }
 
+        // 批量韧性：单个失效/误填的作用域（如 404）只跳过并告警，不中断其余作用域；
+        // 全部失败则视为整体故障，抛出让调度器重试，避免缓存空结果掩盖故障。
         List<ExternalEsportsMatch> result = [];
+        List<Exception> failures = [];
         foreach (string url in urls)
         {
             using HttpRequestMessage request = new(HttpMethod.Get, url);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
 
-            string json = await SendAsync(request, cancellationToken);
-            result.AddRange(PandaScoreMapper.MapMatches(json));
+            try
+            {
+                string json = await SendAsync(request, cancellationToken);
+                result.AddRange(PandaScoreMapper.MapMatches(json));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failures.Add(ex);
+                logger.LogWarning(ex, "拉取赛程作用域失败，跳过该作用域: {Url}", url);
+            }
+        }
+
+        if (failures.Count == urls.Count)
+        {
+            throw new AggregateException($"全部 {urls.Count} 个赛程作用域拉取失败。", failures);
         }
 
         // 同一场比赛可能同时属于 league/serie/tournament 作用域，入库前按外部比赛 ID 合并。
