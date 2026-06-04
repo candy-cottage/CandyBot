@@ -72,7 +72,7 @@ namespace CandyCottage.CandyBot.Services
             }
 
             StringBuilder sb = new();
-            sb.AppendLine("🔑 令牌列表");
+            sb.AppendLine($"**🔑 令牌列表** {"生成令牌".CreateCmdInput()}");
             foreach (DataRow dr in sql.DataSet.Tables[0].Rows)
             {
                 string tokenID = dr["TokenID"].ToString() ?? "";
