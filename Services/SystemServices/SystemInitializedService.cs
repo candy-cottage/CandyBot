@@ -17,21 +17,23 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             using SQLHelper sql = scope.ServiceProvider.GetRequiredService<SQLHelper>();
             await sql.ExecuteAsync(ServerLoginLogs.Insert_ServerLoginLog(sql, "CandyBot", ""));
 
-            taskManager.AddScheduledTask(new("0点同步车辆", new TimeSpan(0, 0, 0), async () =>
-            {
-                await SyncForzaWithDocs();
-            })
+            taskManager.AddScheduledTask(new("0点同步车辆", new TimeSpan(0, 0, 0), RunAsync(SyncForzaWithDocs))
             {
                 // 非立即运行
                 LastRun = DateTime.Now
             });
-            taskManager.AddScheduledTask(new("12点同步车辆", new TimeSpan(12, 0, 0), async () =>
-            {
-                await SyncForzaWithDocs();
-            })
+            taskManager.AddScheduledTask(new("12点同步车辆", new TimeSpan(12, 0, 0), RunAsync(SyncForzaWithDocs))
             {
                 LastRun = DateTime.Now
             });
+        }
+
+        /// <summary>
+        /// FunGame 任务计划只接收 <see cref="Action"/>；这里同步等待异步任务，使调度器能正确记录耗时、阻止重入并捕获异常。
+        /// </summary>
+        private static System.Action RunAsync(Func<Task> action)
+        {
+            return () => action().GetAwaiter().GetResult();
         }
 
         public async Task SyncForzaWithDocs()
