@@ -8,7 +8,6 @@ using CandyCottage.CandyBot.Utilities;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
-using Milimoe.FunGame.Core.Api.Transmittal;
 using Milimoe.FunGame.Core.Api.Utility;
 using Milimoe.FunGame.Core.Entity;
 using Xunit;
@@ -79,7 +78,6 @@ public class BettingScopeFilterCommandTests
             sql: null!,
             functionConfig,
             forzaConfig: null!,
-            candyBotConfig: null!,
             taskQueue: null!,
             taskManager: null!,
             sender,
@@ -88,7 +86,8 @@ public class BettingScopeFilterCommandTests
             userService: null!,
             forzaService: null!,
             forzaSheetImporter: null!,
-            esportsSyncService);
+            esportsSyncService,
+            userAPITokenService: null!);
     }
 
     private static Task WithTempPluginRoot(Func<PandaScoreConfig, Task> body)
