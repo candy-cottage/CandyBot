@@ -1,4 +1,6 @@
-﻿using CandyCottage.CandyBot.Modules.Skills.Mili;
+﻿using CandyCottage.CandyBot.Modules.Skills.Magic;
+using CandyCottage.CandyBot.Modules.Skills.Super;
+using Milimoe.FunGame.Core.Library.Constant;
 
 namespace CandyCottage.CandyBot.Modules.Characters
 {
@@ -18,8 +20,10 @@ namespace CandyCottage.CandyBot.Modules.Characters
             InitialSTR = 15;
             InitialAGI = 25;
             InitialINT = 20;
+            PrimaryAttribute = PrimaryAttribute.AGI;
 
             Skills.Add(new RecoveryMagic(this));
+            Skills.Add(new CrazyDamage(this));
         }
     }
 }

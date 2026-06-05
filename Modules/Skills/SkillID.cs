@@ -11,6 +11,12 @@
     /// </summary>
     public enum SkillID
     {
-        RecoveryMagic = 1001
+        RecoveryMagic = 1001,
+
+        SpeedUp = 2001,
+
+        CrazyDamage = 3001,
+
+        RecoveryAllTime = 4001,
     }
 }
