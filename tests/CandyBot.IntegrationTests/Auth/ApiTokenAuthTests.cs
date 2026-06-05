@@ -3,8 +3,8 @@ using System.Net.Http.Headers;
 using CandyBot.IntegrationTests.Infrastructure;
 using CandyCottage.CandyBot.Utilities;
 using FluentAssertions;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
-using Milimoe.FunGame.Core.Api.Transmittal;
 using Milimoe.FunGame.Core.Api.Utility;
 using Milimoe.FunGame.Core.Entity;
 using ProjectRedbud.FunGame.SQLQueryExtension;
@@ -155,6 +155,15 @@ public sealed class ApiTokenAuthTests : IAsyncLifetime
         {
             sql.Execute("DELETE FROM ApiTokens");
             sql.Success.Should().BeTrue("测试需要模拟全部 bearer 令牌已被删除");
+        }
+
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            IMemoryCache? memoryCache = scope.ServiceProvider.GetRequiredService<IMemoryCache>();
+            CandyBotConfig? config = scope.ServiceProvider.GetRequiredService<CandyBotConfig>();
+            string hashKey = AdminRawToken.Encrypt(config.ApiTokenSalt);
+            string cacheKey = $"api::{hashKey}";
+            memoryCache.Remove(cacheKey);
         }
 
         HttpResponseMessage resp = await client.GetAsync("/betting/bets");
