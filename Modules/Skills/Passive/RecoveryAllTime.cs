@@ -8,7 +8,7 @@ namespace CandyCottage.CandyBot.Modules.Skills.Passive
         public override long Id => (long)SkillID.RecoveryAllTime;
         public override string Name => "时刻治愈";
 
-        public RecoveryAllTime(Character? character = null) : base(SkillType.Magic, character)
+        public RecoveryAllTime(Character? character = null) : base(SkillType.Passive, character)
         {
             Effects.Add(new RecoveryMagicEffect(this));
         }

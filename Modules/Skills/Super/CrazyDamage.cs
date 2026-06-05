@@ -10,7 +10,7 @@ namespace CandyCottage.CandyBot.Modules.Skills.Super
         public override string Name => "疯狂伤害";
         public override double CD => 24;
 
-        public CrazyDamage(Character? character = null) : base(SkillType.Magic, character)
+        public CrazyDamage(Character? character = null) : base(SkillType.SuperSkill, character)
         {
             Effects.Add(new CrazyDamageEffect(this));
         }

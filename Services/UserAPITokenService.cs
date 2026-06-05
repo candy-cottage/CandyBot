@@ -44,7 +44,7 @@ namespace CandyCottage.CandyBot.Services
                             return 3;
                         }
 
-                        string tokenId = Encryption.GenerateRandomString(16);
+                        string tokenId = Guid.NewGuid().ToString("N");
                         secret = $"cd-{Guid.NewGuid():N}";
                         string secretHash = secret.Encrypt(candyBotConfig.ApiTokenSalt);
                         sql.Execute(Milimoe.FunGame.Core.Library.SQLScript.Common.ApiTokens.Insert_APIToken(sql, tokenId, secretHash, username, name));

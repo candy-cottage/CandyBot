@@ -10,7 +10,7 @@ namespace CandyCottage.CandyBot.Modules.Skills.Active
         public override string Name => "加速";
         public override double CD => 10;
 
-        public SpeedUp(Character? character = null) : base(SkillType.Magic, character)
+        public SpeedUp(Character? character = null) : base(SkillType.Skill, character)
         {
             Effects.Add(new SpeedUpEffect(this));
         }
