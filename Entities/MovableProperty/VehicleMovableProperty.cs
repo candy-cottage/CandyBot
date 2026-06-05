@@ -1,6 +1,6 @@
 ﻿using System.Text;
+using CandyCottage.CandyBot.Entities.HumanResource;
 using CandyCottage.CandyBot.Entities.RealEstate;
-using Milimoe.FunGame.Core.Entity;
 
 namespace CandyCottage.CandyBot.Entities.MovableProperty
 {
@@ -25,7 +25,7 @@ namespace CandyCottage.CandyBot.Entities.MovableProperty
         public bool IsParked { get; set; } = false;
         public PackingRequirement ParkingIn { get; set; } = new(Guid.Empty, "");
         public List<TransportSchedule> TransportScheduleList { get; } = [];
-        public List<Character> VehicleOperations { get; } = [];
+        public List<BaseHumanResource> VehicleOperations { get; } = [];
 
         public VehicleMovableProperty()
         {

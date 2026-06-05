@@ -6,7 +6,7 @@ using Milimoe.FunGame.Core.Library.Constant;
 
 namespace CandyCottage.CandyBot.Entities.HumanResource
 {
-    public class BaseHumanResource : BaseEntity, IDescription, IBusinessSimulationEntity
+    public class BaseHumanResource : Character, IDescription, IBusinessSimulationEntity
     {
         public virtual QualityType QualityType { get; set; } = QualityType.White;
         public virtual HumanResourceType HumanResourceType { get; set; } = HumanResourceType.General;
