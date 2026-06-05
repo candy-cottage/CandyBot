@@ -68,7 +68,7 @@ namespace CandyCottage.CandyBot.Services
 
             if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
             {
-                return $"你还没有任何令牌。可用指令：{"生成令牌 <名称>".CreateCmdInput("生成令牌")}。";
+                return $"你还没有任何令牌。可用指令：{"生成令牌 &lt;名称&gt;".CreateCmdInput("生成令牌")}";
             }
 
             StringBuilder sb = new();
