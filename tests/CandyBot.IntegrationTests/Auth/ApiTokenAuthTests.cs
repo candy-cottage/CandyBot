@@ -3,8 +3,8 @@ using System.Net.Http.Headers;
 using CandyBot.IntegrationTests.Infrastructure;
 using CandyCottage.CandyBot.Utilities;
 using FluentAssertions;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
-using Milimoe.FunGame.Core.Api.Transmittal;
 using Milimoe.FunGame.Core.Api.Utility;
 using Milimoe.FunGame.Core.Entity;
 using ProjectRedbud.FunGame.SQLQueryExtension;
@@ -141,6 +141,35 @@ public sealed class ApiTokenAuthTests : IAsyncLifetime
 
         resp.StatusCode.Should().Be(HttpStatusCode.OK,
             "B11 修复后，已认证管理员（角色声明 'admin'）应能访问 GET /betting/bets；若回归为大写检查会得 403");
+    }
+
+    [Fact]
+    public async Task GetBets_删除全部令牌后_原Token立即返回401()
+    {
+        HttpClient client = CreateClient(AdminRawToken);
+
+        HttpResponseMessage first = await client.GetAsync("/betting/bets");
+        first.StatusCode.Should().Be(HttpStatusCode.OK, "首次访问用于确认该 bearer token 原本有效");
+
+        using (MySQLHelper sql = _fixture.CreateHelper())
+        {
+            sql.Execute("DELETE FROM ApiTokens");
+            sql.Success.Should().BeTrue("测试需要模拟全部 bearer 令牌已被删除");
+        }
+
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            IMemoryCache? memoryCache = scope.ServiceProvider.GetRequiredService<IMemoryCache>();
+            CandyBotConfig? config = scope.ServiceProvider.GetRequiredService<CandyBotConfig>();
+            string hashKey = AdminRawToken.Encrypt(config.ApiTokenSalt);
+            string cacheKey = $"api::{hashKey}";
+            memoryCache.Remove(cacheKey);
+        }
+
+        HttpResponseMessage resp = await client.GetAsync("/betting/bets");
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "ApiTokens 表中已无任何令牌，旧 bearer token 不应继续通过 [Authorize] 控制器");
     }
 
     [Fact]
