@@ -144,6 +144,26 @@ public sealed class ApiTokenAuthTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetBets_删除全部令牌后_原Token立即返回401()
+    {
+        HttpClient client = CreateClient(AdminRawToken);
+
+        HttpResponseMessage first = await client.GetAsync("/betting/bets");
+        first.StatusCode.Should().Be(HttpStatusCode.OK, "首次访问用于确认该 bearer token 原本有效");
+
+        using (MySQLHelper sql = _fixture.CreateHelper())
+        {
+            sql.Execute("DELETE FROM ApiTokens");
+            sql.Success.Should().BeTrue("测试需要模拟全部 bearer 令牌已被删除");
+        }
+
+        HttpResponseMessage resp = await client.GetAsync("/betting/bets");
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "ApiTokens 表中已无任何令牌，旧 bearer token 不应继续通过 [Authorize] 控制器");
+    }
+
+    [Fact]
     public async Task GetBets_运营Token_返回200()
     {
         HttpClient client = CreateClient(OperatorRawToken);
