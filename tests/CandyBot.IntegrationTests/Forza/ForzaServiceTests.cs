@@ -294,6 +294,81 @@ public class ForzaServiceTests(MySqlFixture fixture)
     }
 
     // =========================================================================
+    // 组合名搜索 — “制造商简称+型号”紧凑匹配（如 查车 法拉利FXX）
+    // 真实数据制造商形如 "Ferrari 法拉利"，用户输入“法拉利FXX”不含完整制造商串，
+    // 单列 LIKE 无法命中，需要“制造商+型号去空格”的紧凑组合条件。
+    // =========================================================================
+
+    [Fact]
+    public async Task GetVehicleInfoRaw_组合名称无空格命中制造商和型号()
+    {
+        await _fixture.ResetDataAsync();
+        SeedVehicle(MinimalVehicle("Ferrari 法拉利", "FXX", "S2", "Road", "AWD"));
+        SeedVehicle(MinimalVehicle("Porsche", "911 GT3", "S2", "Road", "RWD"));
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+
+        var (success, _, data, _) = svc.GetVehicleInfoRaw("法拉利FXX", 1);
+
+        success.Should().BeTrue();
+        data.Should().NotBeNull();
+        data!.Rows.Count.Should().Be(1, "“法拉利FXX”应命中 Manufacturer=\"Ferrari 法拉利\" + Model=\"FXX\"，且不误中 Porsche");
+        data.Rows[0]["Model"].ToString().Should().Be("FXX");
+    }
+
+    [Fact]
+    public async Task GetVehicleInfoRaw_组合名称有空格命中制造商和型号()
+    {
+        await _fixture.ResetDataAsync();
+        SeedVehicle(MinimalVehicle("Ferrari 法拉利", "FXX", "S2", "Road", "AWD"));
+        SeedVehicle(MinimalVehicle("Porsche", "911 GT3", "S2", "Road", "RWD"));
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+
+        var (success, _, data, _) = svc.GetVehicleInfoRaw("法拉利 FXX", 1);
+
+        success.Should().BeTrue();
+        data.Should().NotBeNull();
+        data!.Rows.Count.Should().Be(1, "“法拉利 FXX”去空格后应命中 Manufacturer=\"Ferrari 法拉利\" + Model=\"FXX\"");
+        data.Rows[0]["Model"].ToString().Should().Be("FXX");
+    }
+
+    [Fact]
+    public async Task GetVehicleInfoRaw_不存在组合名称不误命中()
+    {
+        await _fixture.ResetDataAsync();
+        SeedVehicle(MinimalVehicle("Ferrari 法拉利", "FXX", "S2", "Road", "AWD"));
+        SeedVehicle(MinimalVehicle("Porsche", "911 GT3", "S2", "Road", "RWD"));
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+
+        // “法拉利”与“911”分别存在于两辆不同的车，但组合名“法拉利911”不存在——不应跨行拼接误命中
+        var (success, _, data, totalPages) = svc.GetVehicleInfoRaw("法拉利911", 1);
+
+        (success == false || data == null || data.Rows.Count == 0 || totalPages == 0).Should().BeTrue("组合搜索不应跨车辆拼接误命中");
+    }
+
+    [Fact]
+    public async Task GetVehicleInfo_OR回退路径支持紧凑组合名称()
+    {
+        await _fixture.ResetDataAsync();
+        SeedVehicle(MinimalVehicle("Ferrari 法拉利", "FXX", "S2", "Road", "AWD"));
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+
+        // 模拟聊天指令 ParseManufacturerModel 解析失败后的真实回退：manufacturer == model == 原始输入，useOr=true
+        var (success, msg) = svc.GetVehicleInfo("法拉利FXX", "法拉利FXX", true, 1, out int totalPages);
+
+        success.Should().BeTrue();
+        msg.Should().Contain("Ferrari 法拉利 FXX");
+        totalPages.Should().Be(1);
+    }
+
+    // =========================================================================
     // B09 — 通配符转义：% 和 _ 被字面匹配而非当作通配符
     // =========================================================================
 

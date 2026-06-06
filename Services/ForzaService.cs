@@ -53,11 +53,24 @@ namespace CandyCottage.CandyBot.Services
             if (string.IsNullOrWhiteSpace(vehicleName))
                 return (false, "请提供车辆名称关键字（制造商或型号）。", null, 0);
 
-            string searchPattern = $"%{EscapeLikeWildcards(vehicleName)}%";
-            sql.Parameters["@search"] = searchPattern;
-            string whereClause = "WHERE Manufacturer LIKE @search OR Model LIKE @search";
+            string whereClause = BuildNameSearchWhereClause(vehicleName);
             var (success, message, data, totalPages) = GetVehicleDataTable(whereClause, page);
             return (success, message, data, totalPages);
+        }
+
+        /// <summary>
+        /// 构建“单关键字车辆名称搜索”的 WHERE 子句并绑定参数：命中制造商、型号，
+        /// 或“制造商+型号”去空格后的紧凑组合——数据中制造商形如 "Ferrari 法拉利"，
+        /// 用户输入“法拉利FXX”“法拉利 FXX”不含完整制造商串，单列 LIKE 无法命中，
+        /// 紧凑组合 "Ferrari法拉利FXX" 可以。CONCAT 在 MySQL 与捆绑的 SQLite（3.49）上语法一致；
+        /// 不要改用 ||（MySQL 默认将其解析为逻辑 OR）。Manufacturer/Model 均为 NOT NULL，无需空值防护。
+        /// </summary>
+        // TODO(debt): 紧凑匹配不能覆盖 FerrariFXX 这类英文别名组合（“法拉利”隔在中间）；后续应在服务层支持制造商 token 别名匹配。
+        private string BuildNameSearchWhereClause(string keyword)
+        {
+            sql.Parameters["@search"] = $"%{EscapeLikeWildcards(keyword)}%";
+            sql.Parameters["@compactSearch"] = $"%{EscapeLikeWildcards(keyword.Replace(" ", ""))}%";
+            return "WHERE Manufacturer LIKE @search OR Model LIKE @search OR REPLACE(CONCAT(Manufacturer, Model), ' ', '') LIKE @compactSearch";
         }
 
         public (bool success, string message, DataTable? data, int totalPages) GetVehiclesByClassAndMatchTypeRaw(string? classInput, string? matchTypeInput, int page)
@@ -81,6 +94,13 @@ namespace CandyCottage.CandyBot.Services
 
         public (bool, string) GetVehicleInfo(string? manufacturer, string? model, bool useOr, int page, out int totalPages)
         {
+            // OR 回退仅用于“解析不出制造商”的单关键字场景（当前唯一调用方传入 manufacturer == model == 原始输入），
+            // 与 GetVehicleInfoRaw 共用同一名称搜索条件，使“法拉利FXX”这类组合名也能命中。
+            if (useOr)
+            {
+                return ExecuteVehicleQuery(BuildNameSearchWhereClause(manufacturer ?? model ?? ""), page, out totalPages);
+            }
+
             List<string> conditions = [];
             if (!string.IsNullOrEmpty(manufacturer))
             {
@@ -93,7 +113,7 @@ namespace CandyCottage.CandyBot.Services
                 conditions.Add("Model LIKE @model");
             }
 
-            string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(useOr ? " OR " : " AND ", conditions);
+            string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(" AND ", conditions);
             return ExecuteVehicleQuery(whereClause, page, out totalPages);
         }
 
