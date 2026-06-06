@@ -369,6 +369,63 @@ public class ForzaServiceTests(MySqlFixture fixture)
     }
 
     // =========================================================================
+    // 组合名搜索 — 制造商英文别名（如 FerrariFXX：“法拉利”隔在 Ferrari 和 FXX 中间，
+    // 紧凑串 "Ferrari法拉利FXX" 不含 "FerrariFXX"，需要服务层别名拆分）
+    // =========================================================================
+
+    [Fact]
+    public async Task GetVehicleInfoRaw_英文制造商别名组合命中车辆()
+    {
+        await _fixture.ResetDataAsync();
+        SeedVehicle(MinimalVehicle("Ferrari 法拉利", "FXX", "S2", "Road", "AWD"));
+        SeedVehicle(MinimalVehicle("Porsche", "911 GT3", "S2", "Road", "RWD"));
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+
+        var (success, _, data, _) = svc.GetVehicleInfoRaw("FerrariFXX", 1);
+
+        success.Should().BeTrue();
+        data.Should().NotBeNull();
+        data!.Rows.Count.Should().Be(1);
+        data.Rows[0]["Manufacturer"].ToString().Should().Be("Ferrari 法拉利");
+        data.Rows[0]["Model"].ToString().Should().Be("FXX");
+    }
+
+    [Fact]
+    public async Task GetVehicleInfoRaw_多词英文制造商别名组合命中车辆()
+    {
+        await _fixture.ResetDataAsync();
+        SeedVehicle(MinimalVehicle("Aston Martin 阿斯顿·马丁", "Valkyrie", "S2", "Road", "AWD"));
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+
+        var (success, _, data, _) = svc.GetVehicleInfoRaw("AstonMartinValkyrie", 1);
+
+        success.Should().BeTrue();
+        data.Should().NotBeNull();
+        data!.Rows.Count.Should().Be(1);
+        data.Rows[0]["Model"].ToString().Should().Be("Valkyrie");
+    }
+
+    [Fact]
+    public async Task GetVehicleInfoRaw_英文别名组合不跨车辆误命中()
+    {
+        await _fixture.ResetDataAsync();
+        SeedVehicle(MinimalVehicle("Ferrari 法拉利", "FXX", "S2", "Road", "AWD"));
+        SeedVehicle(MinimalVehicle("Porsche", "911 GT3", "S2", "Road", "RWD"));
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+
+        var (success, _, data, totalPages) = svc.GetVehicleInfoRaw("Ferrari911", 1);
+
+        (success == false || data == null || data.Rows.Count == 0 || totalPages == 0)
+            .Should().BeTrue("Ferrari 和 911 分别存在，但 Ferrari911 这个组合不存在");
+    }
+
+    // =========================================================================
     // B09 — 通配符转义：% 和 _ 被字面匹配而非当作通配符
     // =========================================================================
 

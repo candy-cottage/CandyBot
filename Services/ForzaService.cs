@@ -59,18 +59,85 @@ namespace CandyCottage.CandyBot.Services
         }
 
         /// <summary>
-        /// 构建“单关键字车辆名称搜索”的 WHERE 子句并绑定参数：命中制造商、型号，
-        /// 或“制造商+型号”去空格后的紧凑组合——数据中制造商形如 "Ferrari 法拉利"，
+        /// 构建“单关键字车辆名称搜索”的 WHERE 子句并绑定参数，按以下条件 OR 匹配：
+        /// <list type="number">
+        /// <item>制造商 / 型号单列 LIKE；</item>
+        /// <item>“制造商+型号”去空格后的紧凑组合——数据中制造商形如 "Ferrari 法拉利"，
         /// 用户输入“法拉利FXX”“法拉利 FXX”不含完整制造商串，单列 LIKE 无法命中，
         /// 紧凑组合 "Ferrari法拉利FXX" 可以。CONCAT 在 MySQL 与捆绑的 SQLite（3.49）上语法一致；
-        /// 不要改用 ||（MySQL 默认将其解析为逻辑 OR）。Manufacturer/Model 均为 NOT NULL，无需空值防护。
+        /// 不要改用 ||（MySQL 默认将其解析为逻辑 OR）。Manufacturer/Model 均为 NOT NULL，无需空值防护；</item>
+        /// <item>制造商别名组合——“FerrariFXX”这类输入“法拉利”隔在中间，紧凑组合也无法命中，
+        /// 由 <see cref="ResolveManufacturerAliasSearches"/> 拆成“真实制造商 + 型号关键字”精确分支。</item>
+        /// </list>
         /// </summary>
-        // TODO(debt): 紧凑匹配不能覆盖 FerrariFXX 这类英文别名组合（“法拉利”隔在中间）；后续应在服务层支持制造商 token 别名匹配。
         private string BuildNameSearchWhereClause(string keyword)
         {
+            // 别名解析内部会执行 SQL，必须先于参数绑定（执行后 ClearParametersAfterExecute 会清空已绑定参数）
+            List<(string Manufacturer, string ModelKeyword)> aliasSearches = ResolveManufacturerAliasSearches(keyword);
+
             sql.Parameters["@search"] = $"%{EscapeLikeWildcards(keyword)}%";
             sql.Parameters["@compactSearch"] = $"%{EscapeLikeWildcards(keyword.Replace(" ", ""))}%";
-            return "WHERE Manufacturer LIKE @search OR Model LIKE @search OR REPLACE(CONCAT(Manufacturer, Model), ' ', '') LIKE @compactSearch";
+            List<string> conditions =
+            [
+                "Manufacturer LIKE @search",
+                "Model LIKE @search",
+                "REPLACE(CONCAT(Manufacturer, Model), ' ', '') LIKE @compactSearch",
+            ];
+
+            for (int i = 0; i < aliasSearches.Count; i++)
+            {
+                sql.Parameters[$"@aliasManufacturer{i}"] = aliasSearches[i].Manufacturer;
+                sql.Parameters[$"@aliasModel{i}"] = $"%{EscapeLikeWildcards(aliasSearches[i].ModelKeyword)}%";
+                conditions.Add($"(Manufacturer = @aliasManufacturer{i} AND REPLACE(Model, ' ', '') LIKE @aliasModel{i})");
+            }
+
+            return "WHERE " + string.Join(" OR ", conditions);
+        }
+
+        /// <summary>
+        /// 解析“制造商别名 + 型号”组合输入：从数据库实时读取去重制造商（不用 ForzaConfig 内存缓存，
+        /// 避免新增车辆后缓存过期），把每个制造商按空格拆 token，生成自左 token 前缀与自右 token 后缀
+        /// 作为别名（如 "Aston Martin 阿斯顿·马丁" → Aston、AstonMartin、阿斯顿·马丁……）；
+        /// 去空格后的输入以某别名开头且剩余非空时，得到一个 (真实制造商, 型号关键字) 候选。
+        /// 多个别名命中时只保留最长别名的候选，防止 Aston 抢走 AstonMartin。
+        /// 任何一步失败（如查询失败、无候选）都返回空列表，调用方退化为基础 LIKE 搜索。
+        /// </summary>
+        private List<(string Manufacturer, string ModelKeyword)> ResolveManufacturerAliasSearches(string keyword)
+        {
+            string compactKeyword = keyword.Replace(" ", "");
+            if (compactKeyword == "") return [];
+
+            sql.ExecuteDataSet("SELECT DISTINCT Manufacturer FROM Vehicles");
+            if (!sql.Success || sql.DataSet.Tables.Count == 0) return [];
+
+            List<(int AliasLength, string Manufacturer, string ModelKeyword)> candidates = [];
+            foreach (DataRow row in sql.DataSet.Tables[0].Rows)
+            {
+                string manufacturer = row["Manufacturer"].ToString() ?? "";
+                string[] tokens = manufacturer.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (tokens.Length == 0) continue;
+
+                HashSet<string> aliases = new(StringComparer.OrdinalIgnoreCase);
+                for (int i = 1; i <= tokens.Length; i++)
+                {
+                    aliases.Add(string.Concat(tokens[..i]));  // 自左前缀：Aston、AstonMartin、……
+                    aliases.Add(string.Concat(tokens[^i..])); // 自右后缀：阿斯顿·马丁、Martin阿斯顿·马丁、……
+                }
+
+                foreach (string alias in aliases)
+                {
+                    // 输入必须严格长于别名：剩余部分作为型号关键字，纯厂商搜索不进组合分支
+                    if (compactKeyword.Length > alias.Length &&
+                        compactKeyword.StartsWith(alias, StringComparison.OrdinalIgnoreCase))
+                    {
+                        candidates.Add((alias.Length, manufacturer, compactKeyword[alias.Length..]));
+                    }
+                }
+            }
+
+            if (candidates.Count == 0) return [];
+            int maxLength = candidates.Max(c => c.AliasLength);
+            return [.. candidates.Where(c => c.AliasLength == maxLength).Select(c => (c.Manufacturer, c.ModelKeyword)).Distinct()];
         }
 
         public (bool success, string message, DataTable? data, int totalPages) GetVehiclesByClassAndMatchTypeRaw(string? classInput, string? matchTypeInput, int page)
