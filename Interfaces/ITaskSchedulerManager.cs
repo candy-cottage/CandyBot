@@ -10,7 +10,7 @@ namespace CandyCottage.CandyBot.Interfaces
         public RecurringTask? GetRecurringTask(string name);
         public bool PauseTask(string name);
         public bool ResumeTask(string name);
-        public void AddScheduledTask(ScheduledTask task, bool runNow = false);
+        public void AddScheduledTask(ScheduledTask task, bool todayMustRun = false);
         public void AddRecurringTask(RecurringTask task, bool runNow = false);
         public bool IsPaused(string name);
     }

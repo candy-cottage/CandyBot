@@ -40,30 +40,32 @@ namespace CandyCottage.CandyBot.Utilities
             return true;
         }
 
-        public void AddScheduledTask(ScheduledTask task, bool runToday = false) => AddTask(task, false, runToday);
+        public void AddScheduledTask(ScheduledTask task, bool todayMustRun = false) => AddTask(task, false, todayMustRun);
 
         public void AddRecurringTask(RecurringTask task, bool runNow = false) => AddTask(task, runNow);
 
         public bool IsPaused(string name) => _pausedTasks.ContainsKey(name);
 
-        private void AddTask<T>(T task, bool runNow = false, bool runToday = false) where T : IScheduledTask
+        private void AddTask<T>(T task, bool runNow = false, bool todayMustRun = false) where T : IScheduledTask
         {
             // 如果任务已存在，可选择覆盖或抛出异常，这里采用覆盖策略
             _tasks[task.Name] = task;
             // 确保新添加的任务没有被暂停
             _pausedTasks.TryRemove(task.Name, out _);
 
+            DateTime now = DateTime.Now;
+
             // 根据是否 runNow 初始化 NextRun
             if (task is RecurringTask rt && rt.NextRun == DateTime.MaxValue)
             {
-                rt.NextRun = runNow ? DateTime.Now : DateTime.Now + rt.Interval;
+                rt.NextRun = runNow ? now : now + rt.Interval;
             }
 
-            // 时间计划必须以执行时间为基准，每次执行都必须是确定的时间点，与添加时机无关
-            // 如果 runToday，设置为昨天以便系统可以正确识别；反之，由底层模型自动计算下一次执行时间
-            if (task is ScheduledTask st && runToday)
+            // 每日时间计划必须以设定时间为基准，每次执行都必须是确定的时间点，与添加时机无关
+            // todayMustRun 用于在添加时间大于设定时间时，强制将 LastRun 设置为昨天的同一时间，以确保当天会执行
+            if (task is ScheduledTask st && now > DateTime.Today.Add(st.TimeOfDay))
             {
-                st.LastRun = DateTime.Today.AddDays(-1).Add(st.TimeOfDay);
+                st.LastRun = todayMustRun ? DateTime.Today.AddDays(-1).Add(st.TimeOfDay) : DateTime.Today.Add(st.TimeOfDay);
             }
         }
     }
