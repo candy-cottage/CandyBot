@@ -17,15 +17,8 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             using SQLHelper sql = scope.ServiceProvider.GetRequiredService<SQLHelper>();
             await sql.ExecuteAsync(ServerLoginLogs.Insert_ServerLoginLog(sql, "CandyBot", ""));
 
-            taskManager.AddScheduledTask(new("0点同步车辆", new TimeSpan(0, 0, 0), RunAsync(SyncForzaWithDocs))
-            {
-                // 非立即运行
-                LastRun = DateTime.Now
-            });
-            taskManager.AddScheduledTask(new("12点同步车辆", new TimeSpan(12, 0, 0), RunAsync(SyncForzaWithDocs))
-            {
-                LastRun = DateTime.Now
-            });
+            taskManager.AddScheduledTask(new("0点同步车辆", new TimeSpan(0, 0, 0), RunAsync(SyncForzaWithDocs)), false);
+            taskManager.AddScheduledTask(new("12点同步车辆", new TimeSpan(12, 0, 0), RunAsync(SyncForzaWithDocs)), false);
         }
 
         /// <summary>
