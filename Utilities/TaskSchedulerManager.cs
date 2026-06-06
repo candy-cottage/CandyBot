@@ -61,12 +61,9 @@ namespace CandyCottage.CandyBot.Utilities
 
             // 时间计划必须以执行时间为基准，每次执行都必须是确定的时间点，与添加时机无关
             // 如果 runToday，设置为昨天以便系统可以正确识别；反之，由底层模型自动计算下一次执行时间
-            if (task is ScheduledTask st)
+            if (task is ScheduledTask st && runToday)
             {
-                if (runToday)
-                {
-                    st.LastRun = DateTime.Today.AddDays(-1).Add(st.TimeOfDay);
-                }
+                st.LastRun = DateTime.Today.AddDays(-1).Add(st.TimeOfDay);
             }
         }
     }
