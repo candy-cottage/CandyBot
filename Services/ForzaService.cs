@@ -418,8 +418,9 @@ namespace CandyCottage.CandyBot.Services
                 if (!sql.Success)
                     return (false, "删除失败，请稍后重试", 0);
 
+                int deleted = sql.AffectedRows;
                 sql.Commit();
-                return (true, $"成功删除 {ids.Count} 辆车", ids.Count);
+                return (true, $"成功删除 {deleted} 辆车", deleted);
             }
             catch (Exception ex)
             {
@@ -506,6 +507,33 @@ namespace CandyCottage.CandyBot.Services
                 sql.Parameters[$"@{columnName}"] = value;
                 clauses.Add($"{columnName} = @{columnName}");
             }
+        }
+
+        /// <summary>校验数值/布尔字段：非空时必须为合法数字。</summary>
+        private static bool ValidateNumericFields(MapRequest request, out string error)
+        {
+            error = "";
+            if (request.Difficulty != null && !int.TryParse(request.Difficulty, out _))
+            { error = "难度必须为整数。"; return false; }
+            if (request.TurnCount != null && !int.TryParse(request.TurnCount, out _))
+            { error = "弯道数必须为整数。"; return false; }
+            if (request.AvgTimeSec != null && !int.TryParse(request.AvgTimeSec, out _))
+            { error = "圈速必须为整数（秒）。"; return false; }
+            if (request.NightMode != null && !int.TryParse(request.NightMode, out _))
+            { error = "夜间必须为 0 或 1。"; return false; }
+            if (request.IsReverse != null && !int.TryParse(request.IsReverse, out _))
+            { error = "反向必须为 0 或 1。"; return false; }
+            return true;
+        }
+
+        /// <summary>将用户输入的别名字符串编码为 JSON 数组。已含方括号则原样保留。</summary>
+        private static string? EncodeAliases(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            string trimmed = raw.Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']')) return trimmed;
+            string[] parts = trimmed.Split([',', '，', '、'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return "[\"" + string.Join("\",\"", parts.Select(p => p.Replace("\"", "\\\""))) + "\"]";
         }
 
         private void AddWhereClause(List<string> clauses, string columnName, string? value)
@@ -660,11 +688,23 @@ namespace CandyCottage.CandyBot.Services
                 error = "中文名不能为空。";
                 return false;
             }
+            if (string.IsNullOrEmpty(request.NameEn))
+            {
+                error = "英文名不能为空。";
+                return false;
+            }
             if (string.IsNullOrEmpty(request.RouteType))
             {
                 error = "路线类型不能为空。";
                 return false;
             }
+            if (string.IsNullOrEmpty(request.LengthKm) || !decimal.TryParse(request.LengthKm, out _))
+            {
+                error = "赛道长度不能为空，且必须为数字。";
+                return false;
+            }
+            if (!ValidateNumericFields(request, out error))
+                return false;
 
             try
             {
@@ -695,7 +735,7 @@ namespace CandyCottage.CandyBot.Services
                 List<string> values = [];
                 AddField(columns, values, "NameZh", request.NameZh);
                 AddField(columns, values, "NameEn", request.NameEn);
-                AddField(columns, values, "Aliases", request.Aliases);
+                AddField(columns, values, "Aliases", EncodeAliases(request.Aliases));
                 AddField(columns, values, "LengthKm", request.LengthKm);
                 AddField(columns, values, "RouteType", request.RouteType);
                 AddField(columns, values, "Surface", request.Surface);
@@ -763,7 +803,7 @@ namespace CandyCottage.CandyBot.Services
                 List<string> setClauses = [];
                 AddSetClause(setClauses, "NameZh", request.NameZh);
                 AddSetClause(setClauses, "NameEn", request.NameEn);
-                AddSetClause(setClauses, "Aliases", request.Aliases);
+                AddSetClause(setClauses, "Aliases", EncodeAliases(request.Aliases));
                 AddSetClause(setClauses, "LengthKm", request.LengthKm);
                 AddSetClause(setClauses, "RouteType", request.RouteType);
                 AddSetClause(setClauses, "Surface", request.Surface);
@@ -836,8 +876,9 @@ namespace CandyCottage.CandyBot.Services
                 if (!sql.Success)
                     return (false, "删除失败，请稍后重试", 0);
 
+                int deleted = sql.AffectedRows;
                 sql.Commit();
-                return (true, $"成功删除 {ids.Count} 条赛道", ids.Count);
+                return (true, $"成功删除 {deleted} 条赛道", deleted);
             }
             catch (Exception ex)
             {
@@ -867,6 +908,9 @@ namespace CandyCottage.CandyBot.Services
                 AddWhereClause(whereClauses, "Difficulty", request.Difficulty);
                 AddWhereClause(whereClauses, "Region", request.Region);
                 AddWhereClause(whereClauses, "Dlc", request.Dlc);
+
+                if (whereClauses.Count == 0)
+                    return (false, "请提供至少一个匹配条件。", null);
 
                 string query = $@"
                     SELECT Id, NameZh, NameEn, LengthKm, RouteType, Surface, Characteristic

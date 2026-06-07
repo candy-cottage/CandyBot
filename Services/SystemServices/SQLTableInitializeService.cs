@@ -80,12 +80,13 @@ namespace CandyCottage.CandyBot.Services.SystemServices
 
         public void EnsureForzaMapSchema()
         {
-            bool mapsExists = sql is MySQLHelper ? MySqlTableExists("Maps") : SqliteTableExists("Maps");
-            if (mapsExists)
+            // 本项目生产环境使用 MySQL；SQLite 仅为 FunGame 库兼容性保留，
+            // 不做 DDL 兜底（SQLite 无法解析 AUTO_INCREMENT/KEY/ENGINE 等 MySQL 方言）。
+            if (sql is not MySQLHelper)
                 return;
 
-            // 如果 Maps 表不存在，将三张赛道表一并创建。
-            // DDL 直接从 forza.sql 提取，MySQL/SQLite 共享同一脚本（SQLite 忽略 ENGINE/COLLATE 等子句）。
+            if (MySqlTableExists("Maps"))
+                return;
             ExecuteSchemaStatement(@"CREATE TABLE IF NOT EXISTS `Maps` (
     `Id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
     `NameZh` VARCHAR(100) NOT NULL COMMENT '中文名',

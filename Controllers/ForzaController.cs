@@ -97,7 +97,7 @@ namespace CandyCottage.CandyBot.Controllers
             if (string.IsNullOrWhiteSpace(ids))
                 return BadRequest(new { success = false, message = "请提供 ids 参数，例如 ?ids=1,2,3" });
 
-            List<int> idList = [.. ids.Split(',').Select(s => int.TryParse(s, out int id) ? id : -1).Select(id => id)];
+            List<int> idList = [.. ids.Split(',').Where(s => int.TryParse(s, out _)).Select(int.Parse)];
             if (idList.Count == 0)
                 return BadRequest(new { success = false, message = "ids 中未包含有效的数字 ID" });
 
@@ -234,7 +234,7 @@ namespace CandyCottage.CandyBot.Controllers
             if (string.IsNullOrWhiteSpace(ids))
                 return BadRequest(new { success = false, message = "请提供 ids 参数，例如 ?ids=1,2,3" });
 
-            List<int> idList = [.. ids.Split(',').Select(s => int.TryParse(s, out int id) ? id : -1).Select(id => id)];
+            List<int> idList = [.. ids.Split(',').Where(s => int.TryParse(s, out _)).Select(int.Parse)];
             if (idList.Count == 0)
                 return BadRequest(new { success = false, message = "ids 中未包含有效的数字 ID" });
 

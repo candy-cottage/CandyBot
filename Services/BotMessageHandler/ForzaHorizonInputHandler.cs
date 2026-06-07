@@ -535,13 +535,14 @@ public partial class CandyBotService
                 {
                     await botService.SendAsync(e,
                         "格式：新增赛道 中文名=xxx 英文名=xxx 路线类型=xxx 长度=xxx [其他参数]\r\n" +
-                        "必填字段：中文名、路线类型（circuit/sprint）\r\n" +
-                        "可用参数：中文名= 英文名= 别名= 长度(km)= 路线类型= 路面= 赛事大类= 赛道特性= 难度= 海拔= 弯道数= 路宽= 圈速(秒)= 世界纪录= WR车辆= WR调校= 推荐等级= 推荐车型= 区域= 最佳赛季= 天气= 夜间= DLC= 反向= 图片URL= 小地图URL= 备注=\r\n" +
+                        "必填字段：中文名、英文名、路线类型（circuit/sprint）、长度（数字）\r\n" +
+                        "可用参数：中文名= 英文名= 别名= 长度= 路线类型= 路面= 赛事大类= 赛道特性= 难度= 海拔= 弯道数= 路宽= 圈速= 世界纪录= WR车辆= WR调校= 推荐等级= 推荐车型= 区域= 最佳赛季= 天气= 夜间= DLC= 反向= 图片URL= 小地图URL= 备注=\r\n" +
+                        "别名支持逗号/顿号分隔，自动编码为 JSON 数组。含空格的英文名请加引号。\r\n" +
                         "路线类型：circuit=圈图, sprint=冲刺图\r\n" +
                         "路面：asphalt/dirt/gravel/sand/mixed/snow/cross_country\r\n" +
                         "赛事大类：road/dirt/cross_country/street/drag/rally/showcase/mountain_road（峠道）\r\n" +
                         "赛道特性：handling/speed/balanced/offroad/drift/technical\r\n" +
-                        "示例：新增赛道 中文名=海滨冲刺 英文名=Coastal Sprint 路线类型=sprint 长度=8.4 路面=asphalt 赛道特性=speed 难度=2 区域=Pacific Coast");
+                        "示例：新增赛道 中文名=海滨冲刺 英文名=\"Coastal Sprint\" 路线类型=sprint 长度=8.4 路面=asphalt 赛道特性=speed 难度=2 区域=Pacific Coast");
                     return true;
                 }
 
@@ -552,9 +553,10 @@ public partial class CandyBotService
                     return true;
                 }
 
-                if (string.IsNullOrEmpty(mapRequest.NameZh) || string.IsNullOrEmpty(mapRequest.RouteType))
+                if (string.IsNullOrEmpty(mapRequest.NameZh) || string.IsNullOrEmpty(mapRequest.NameEn) ||
+                    string.IsNullOrEmpty(mapRequest.RouteType) || string.IsNullOrEmpty(mapRequest.LengthKm))
                 {
-                    md.Content = "缺少必填字段：中文名、路线类型都必须提供。";
+                    md.Content = "缺少必填字段：中文名、英文名、路线类型、长度都必须提供。";
                     reply.Keyboard = new KeyboardMessage().AppendButtons(1, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
                     await botService.SendAsync(e, reply);
                     return true;
@@ -590,7 +592,7 @@ public partial class CandyBotService
                 {
                     await botService.SendAsync(e,
                         "格式：修改赛道 <赛道ID> [参数=值]\r\n" +
-                        "可用参数：中文名= 英文名= 别名= 长度(km)= 路线类型= 路面= 赛事大类= 赛道特性= 难度= 海拔= 弯道数= 路宽= 圈速(秒)= 世界纪录= WR车辆= WR调校= 推荐等级= 推荐车型= 区域= 最佳赛季= 天气= 夜间= DLC= 反向= 图片URL= 小地图URL= 备注=\r\n" +
+                        "可用参数：中文名= 英文名= 别名= 长度= 路线类型= 路面= 赛事大类= 赛道特性= 难度= 海拔= 弯道数= 路宽= 圈速= 世界纪录= WR车辆= WR调校= 推荐等级= 推荐车型= 区域= 最佳赛季= 天气= 夜间= DLC= 反向= 图片URL= 小地图URL= 备注=\r\n" +
                         "示例：修改赛道 1 难度=4 赛道特性=technical");
                     return true;
                 }
@@ -701,9 +703,12 @@ public partial class CandyBotService
                     sb.AppendLine($"• ID {m.Id}：{m.DisplayName}");
                 sb.AppendLine("\n是否确认删除以上所有赛道？");
 
+                // 将匹配到的 ID 列表编码进确认按钮，关闭 TOCTOU 窗口
+                string idListPayload = string.Join(",", matches.Select(m => m.Id.ToString()));
+
                 md.Content = sb.ToString();
                 reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(1, Button.CreateCmdButton("✅ 确认删除赛道", detail, false));
+                    .AppendButtons(1, Button.CreateCmdButton("✅ 确认删除赛道", "确认删除赛道 " + idListPayload, false));
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -714,33 +719,25 @@ public partial class CandyBotService
                     return true;
 
                 string detail = e.Detail["确认删除赛道".Length..].Trim();
-                if (string.IsNullOrEmpty(detail))
+                // 解析逗号分隔的 ID 列表
+                List<int> idsToDelete = [];
+                foreach (string token in detail.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries))
                 {
-                    md.Content = "请提供要删除的赛道信息，例如：确认删除赛道 中文名=xxx ...";
+                    if (int.TryParse(token, out int id) && id > 0)
+                        idsToDelete.Add(id);
+                }
+
+                if (idsToDelete.Count == 0)
+                {
+                    md.Content = "未找到有效的赛道 ID，请重新执行删除赛道操作。";
                     await botService.SendAsync(e, reply);
                     return true;
                 }
 
-                MapRequest mapConfirmRequest = new();
-                if (!ParseMapKeyValuePairs(detail, mapConfirmRequest, out string parseError3))
-                {
-                    await botService.SendAsync(e, parseError3);
-                    return true;
-                }
-
-                var (findSuccess, findMsg, matches) = forzaService.FindMapsByCriteria(mapConfirmRequest);
-                if (!findSuccess || matches == null || matches.Count == 0)
-                {
-                    md.Content = findMsg;
-                    await botService.SendAsync(e, reply);
-                    return true;
-                }
-
-                List<int> idsToDelete = [.. matches.Select(m => m.Id)];
                 var (delSuccess, delMsg, _) = forzaService.DeleteMapsByIds(idsToDelete);
                 if (delSuccess)
                 {
-                    md.Content = $"✅ 已删除 {matches.Count} 条赛道：\n" + string.Join("\n", matches.Select(m => $"• ID {m.Id}：{m.DisplayName}"));
+                    md.Content = $"✅ 已删除 {idsToDelete.Count} 条赛道。";
                 }
                 else
                 {
@@ -914,7 +911,6 @@ public partial class CandyBotService
                     request.Aliases = val;
                     break;
                 case "长度":
-                case "长度(km)":
                 case "lengthkm":
                     request.LengthKm = val;
                     break;
@@ -952,7 +948,6 @@ public partial class CandyBotService
                     request.RoadWidth = val;
                     break;
                 case "圈速":
-                case "圈速(秒)":
                 case "avgtimesec":
                     request.AvgTimeSec = val;
                     break;
