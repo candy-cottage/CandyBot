@@ -24,9 +24,7 @@ public partial class CandyBotService
             if (e.Detail == "地平线")
             {
                 md.Content = $"🥯{"糖果屋".CreateCmdInput()}🍧提供《极限竞速：地平线6》的相关查询功能哦，欢迎体验～\r\n测试中，不代表最终品质，如有疑问请联系维护者QQ：3305106902。\r\n**鸣谢**\r\n开发者：Mili's Candy Cottage\r\ngithub@milimoe、github@iHaydenzZ\r\n车辆调校数据来源：ZGC俱乐部《地平线6车辆摸索》\r\n赛道数据来源：ThickSea214561《FH6赛道名称中英文对照表》";
-                reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(2,
-                        ForzaNavButtons());
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -83,11 +81,6 @@ public partial class CandyBotService
             if (e.Detail.StartsWith("查赛道"))
             {
                 string detail = e.Detail["查赛道".Length..].Trim();
-                List<Button> buttons = [
-                    Button.CreateCmdButton("🏎 查车", "查车", false),
-                    Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                    Button.CreateCmdButton("📊 查等级", "查等级", false),
-                ];
                 reply.Keyboard = new KeyboardMessage();
 
                 // 分离页码
@@ -106,7 +99,7 @@ public partial class CandyBotService
                                  "示例：查赛道 白川\r\n" +
                                  "示例：查赛道 Shirakawa\r\n" +
                                  "支持按中文名、英文名、别名搜索。";
-                    reply.Keyboard.AppendButtonsWithNewRow(3, buttons);
+                    reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -123,7 +116,7 @@ public partial class CandyBotService
                 {
                     md.Content = msg;
                 }
-                reply.Keyboard.AppendButtonsWithNewRow(3, buttons);
+                reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -155,7 +148,7 @@ public partial class CandyBotService
                         "示例：查车 FXX\r\n" +
                         "示例：查车 法拉利FXX\r\n" +
                         "支持模糊查询，如：查车 FX。";
-                    reply.Keyboard.AppendButtonsWithNewRow(3, buttons);
+                    reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -177,7 +170,7 @@ public partial class CandyBotService
                 {
                     reply.Keyboard.AddPaginationRow($"查车 {queryStr} ", page, totalPages);
                 }
-                reply.Keyboard.AppendButtonsWithNewRow(3, buttons);
+                reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -191,9 +184,7 @@ public partial class CandyBotService
                                  "示例：查等级 S1 公路\r\n" +
                                  "示例：查等级 A\r\n" +
                                  "示例：查等级 越野\r\n";
-                    reply.Keyboard = new KeyboardMessage()
-                        .AppendButtons(2,
-                            ForzaNavButtons());
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -256,10 +247,7 @@ public partial class CandyBotService
                 {
                     reply.Keyboard.AddPaginationRow(baseCmd + " ", page, totalPages);
                 }
-                reply.Keyboard.AppendButtonsWithNewRow(3,
-                    Button.CreateCmdButton("🏎 查车", "查车", false),
-                    Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                    Button.CreateCmdButton("📊 查等级", "查等级", false));
+                reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
 
                 await botService.SendAsync(e, reply);
                 return true;
@@ -312,9 +300,7 @@ public partial class CandyBotService
                 }
 
                 md.Content = "车辆信息修改成功。";
-                reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(2,
-                        ForzaNavButtons());
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -373,11 +359,7 @@ public partial class CandyBotService
                     }
                 }
 
-                reply.Keyboard.AppendButtons(2,
-                    Button.CreateCmdButton("🌟 地平线", "地平线", false),
-                    Button.CreateCmdButton("🏎 查车", "查车", false),
-                    Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                    Button.CreateCmdButton("📊 查等级", "查等级", false));
+                reply.Keyboard.AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -421,9 +403,7 @@ public partial class CandyBotService
                 {
                     var (success, msg, deletedCount) = forzaService.DeleteVehiclesByIds(ids);
                     md.Content = success ? $"✅ {msg}" : $"❌ {msg}";
-                    reply.Keyboard = new KeyboardMessage()
-                        .AppendButtons(2,
-                            ForzaNavButtons());
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -494,9 +474,7 @@ public partial class CandyBotService
                     md.Content = $"❌ 删除失败：{delMsg}";
                 }
 
-                reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(2,
-                        ForzaNavButtons());
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -550,8 +528,7 @@ public partial class CandyBotService
                     md.Content = $"❌ 新增失败：{addError}";
                 }
 
-                reply.Keyboard.AppendButtons(2,
-                    ForzaNavButtons());
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -600,9 +577,7 @@ public partial class CandyBotService
                 }
 
                 md.Content = "赛道信息修改成功。";
-                reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(2,
-                        ForzaNavButtons());
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -644,9 +619,7 @@ public partial class CandyBotService
                 {
                     var (delSuccess, delMsg, _) = forzaService.DeleteMapsByIds(ids);
                     md.Content = delSuccess ? $"✅ {delMsg}" : $"❌ {delMsg}";
-                    reply.Keyboard = new KeyboardMessage()
-                        .AppendButtons(2,
-                            ForzaNavButtons());
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -713,9 +686,7 @@ public partial class CandyBotService
                     md.Content = $"❌ 删除失败：{delMsg}";
                 }
 
-                reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(2,
-                        ForzaNavButtons());
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
