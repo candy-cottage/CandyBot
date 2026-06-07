@@ -519,9 +519,9 @@ namespace CandyCottage.CandyBot.Services
             { error = "弯道数必须为整数。"; return false; }
             if (request.AvgTimeSec != null && !int.TryParse(request.AvgTimeSec, out _))
             { error = "圈速必须为整数（秒）。"; return false; }
-            if (request.NightMode != null && !int.TryParse(request.NightMode, out _))
+            if (request.NightMode != null && (!int.TryParse(request.NightMode, out int nm) || nm < 0 || nm > 1))
             { error = "夜间必须为 0 或 1。"; return false; }
-            if (request.IsReverse != null && !int.TryParse(request.IsReverse, out _))
+            if (request.IsReverse != null && (!int.TryParse(request.IsReverse, out int rv) || rv < 0 || rv > 1))
             { error = "反向必须为 0 或 1。"; return false; }
             return true;
         }
@@ -749,8 +749,8 @@ namespace CandyCottage.CandyBot.Services
                 AddField(columns, values, "WorldRecord", request.WorldRecord);
                 AddField(columns, values, "WrVehicle", request.WrVehicle);
                 AddField(columns, values, "WrTuning", request.WrTuning);
-                AddField(columns, values, "CarClassBest", request.CarClassBest);
-                AddField(columns, values, "CarTypeBest", request.CarTypeBest);
+                AddField(columns, values, "CarClassBest", EncodeAliases(request.CarClassBest));
+                AddField(columns, values, "CarTypeBest", EncodeAliases(request.CarTypeBest));
                 AddField(columns, values, "Region", request.Region);
                 AddField(columns, values, "SeasonBest", request.SeasonBest);
                 AddField(columns, values, "WeatherDefault", request.WeatherDefault);
@@ -817,8 +817,8 @@ namespace CandyCottage.CandyBot.Services
                 AddSetClause(setClauses, "WorldRecord", request.WorldRecord);
                 AddSetClause(setClauses, "WrVehicle", request.WrVehicle);
                 AddSetClause(setClauses, "WrTuning", request.WrTuning);
-                AddSetClause(setClauses, "CarClassBest", request.CarClassBest);
-                AddSetClause(setClauses, "CarTypeBest", request.CarTypeBest);
+                AddSetClause(setClauses, "CarClassBest", EncodeAliases(request.CarClassBest));
+                AddSetClause(setClauses, "CarTypeBest", EncodeAliases(request.CarTypeBest));
                 AddSetClause(setClauses, "Region", request.Region);
                 AddSetClause(setClauses, "SeasonBest", request.SeasonBest);
                 AddSetClause(setClauses, "WeatherDefault", request.WeatherDefault);
