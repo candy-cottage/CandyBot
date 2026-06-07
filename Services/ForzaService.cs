@@ -899,6 +899,56 @@ namespace CandyCottage.CandyBot.Services
 
         // ==================== 赛道呈现 ====================
 
+        private static readonly Dictionary<string, string> RouteTypeLabel = new()
+        {
+            ["circuit"] = "圈图", ["sprint"] = "冲刺图"
+        };
+        private static readonly Dictionary<string, string> RaceCategoryLabel = new()
+        {
+            ["road"] = "公路", ["dirt"] = "泥地", ["cross_country"] = "越野",
+            ["street"] = "街头", ["drag"] = "直线加速", ["rally"] = "拉力",
+            ["showcase"] = "表演赛", ["mountain_road"] = "峠道"
+        };
+        private static readonly Dictionary<string, string> SurfaceLabel = new()
+        {
+            ["asphalt"] = "柏油路", ["dirt"] = "泥地", ["gravel"] = "砂石",
+            ["sand"] = "沙地", ["mixed"] = "混合", ["snow"] = "雪地", ["cross_country"] = "越野"
+        };
+        private static readonly Dictionary<string, string> CharacteristicLabel = new()
+        {
+            ["handling"] = "操控", ["speed"] = "极速", ["balanced"] = "均衡",
+            ["offroad"] = "越野", ["drift"] = "漂移", ["technical"] = "技术"
+        };
+        private static readonly Dictionary<string, string> ElevationLabel = new()
+        {
+            ["flat"] = "平坦", ["gentle"] = "缓坡", ["hilly"] = "丘陵", ["mountainous"] = "山地"
+        };
+        private static readonly Dictionary<string, string> RoadWidthLabel = new()
+        {
+            ["narrow"] = "窄", ["normal"] = "正常", ["wide"] = "宽"
+        };
+        private static readonly Dictionary<string, string> SeasonLabel = new()
+        {
+            ["spring"] = "春", ["summer"] = "夏", ["autumn"] = "秋", ["winter"] = "冬",
+            ["wet"] = "湿地", ["dry"] = "干地", ["all"] = "全部"
+        };
+        private static readonly Dictionary<string, string> WeatherLabel = new()
+        {
+            ["clear"] = "晴", ["rain"] = "雨", ["fog"] = "雾", ["storm"] = "暴风雨",
+            ["snow"] = "雪", ["variable"] = "多变"
+        };
+
+        private static string T(Dictionary<string, string> map, string key)
+            => map.TryGetValue(key, out string? v) ? v : key;
+
+        /// <summary>去掉 decimal 末尾多余的零：6.900 → 6.9，8.0 → 8</summary>
+        private static string FormatKm(string raw)
+        {
+            if (decimal.TryParse(raw, out decimal d))
+                return d.ToString("0.###");
+            return raw;
+        }
+
         internal static string RenderMapsAsCards(DataTable dt)
         {
             StringBuilder sb = new();
@@ -907,27 +957,40 @@ namespace CandyCottage.CandyBot.Services
                 DataRow row = dt.Rows[i];
                 string Cell(string col) => dt.Columns.Contains(col) ? (row[col]?.ToString() ?? "").Trim() : "";
 
-                // 标题行：中文名 (英文名) · 路线类型/路面 · 赛道特性
+                // 标题行：中文名 (英文名) · 冲刺图/柏油路 · 操控
                 string title = $"**{Cell("NameZh")}**";
                 if (Cell("NameEn") != "") title += $" ({Cell("NameEn")})";
-                title += $" · {Cell("RouteType")}/{Cell("Surface")} · {Cell("Characteristic")}";
-                if (Cell("IsReverse") == "1") title += " 🔄";
-                if (Cell("NightMode") == "1") title += " 🌙";
-                title += $"\r\n> ";
+
+                List<string> titleTags = [];
+                string rt = Cell("RouteType");
+                if (rt != "") titleTags.Add(T(RouteTypeLabel, rt));
+                string sf = Cell("Surface");
+                if (sf != "") titleTags.Add(T(SurfaceLabel, sf));
+                string ch = Cell("Characteristic");
+                if (ch != "") titleTags.Add(T(CharacteristicLabel, ch));
+                if (Cell("IsReverse") == "1") titleTags.Add("反向");
+                if (Cell("NightMode") == "1") titleTags.Add("夜间");
+                if (titleTags.Count > 0)
+                    title += " · " + string.Join(" · ", titleTags);
+
+                title += "\r\n> ";
                 sb.Append(title);
 
                 // 长度 | 难度 | 海拔 | 弯道
                 List<string> stats = [];
-                if (Cell("LengthKm") != "") stats.Add($"全长 {Cell("LengthKm")} km");
+                if (Cell("LengthKm") != "") stats.Add($"全长 {FormatKm(Cell("LengthKm"))} km");
                 if (Cell("Difficulty") != "") stats.Add($"难度 {Cell("Difficulty")}/5");
-                if (Cell("Elevation") != "") stats.Add(Cell("Elevation"));
+                string elev = Cell("Elevation");
+                if (elev != "") stats.Add(T(ElevationLabel, elev));
                 if (Cell("TurnCount") != "") stats.Add($"{Cell("TurnCount")} 弯");
                 AppendLineIfAny(sb, string.Join(" | ", stats));
 
                 // 赛事大类 | 道路宽度
                 List<string> extra = [];
-                if (Cell("RaceCategory") != "") extra.Add(Cell("RaceCategory"));
-                if (Cell("RoadWidth") != "") extra.Add($"路宽: {Cell("RoadWidth")}");
+                string rc = Cell("RaceCategory");
+                if (rc != "") extra.Add(T(RaceCategoryLabel, rc));
+                string rw = Cell("RoadWidth");
+                if (rw != "") extra.Add($"路宽: {T(RoadWidthLabel, rw)}");
                 AppendLineIfAny(sb, string.Join(" · ", extra));
 
                 // 推荐车辆等级 / 类型
@@ -938,8 +1001,10 @@ namespace CandyCottage.CandyBot.Services
 
                 // 最佳赛季 | 默认天气
                 List<string> env = [];
-                if (Cell("SeasonBest") != "") env.Add($"最佳赛季: {Cell("SeasonBest")}");
-                if (Cell("WeatherDefault") != "") env.Add($"天气: {Cell("WeatherDefault")}");
+                string sb2 = Cell("SeasonBest");
+                if (sb2 != "") env.Add($"最佳赛季: {T(SeasonLabel, sb2)}");
+                string wd = Cell("WeatherDefault");
+                if (wd != "") env.Add($"天气: {T(WeatherLabel, wd)}");
                 AppendLineIfAny(sb, string.Join(" · ", env));
 
                 // 区域 | DLC
