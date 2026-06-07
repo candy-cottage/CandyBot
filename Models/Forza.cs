@@ -18,4 +18,36 @@
         public string? LapTime { get; set; }
         public string? ExtData { get; set; }
     }
+
+    public class MapRequest
+    {
+        public int? Id { get; set; }
+        public string? NameZh { get; set; }
+        public string? NameEn { get; set; }
+        public string? Aliases { get; set; }
+        public string? LengthKm { get; set; }
+        public string? RouteType { get; set; }
+        public string? Surface { get; set; }
+        public string? RaceCategory { get; set; }
+        public string? Characteristic { get; set; }
+        public string? Difficulty { get; set; }
+        public string? Elevation { get; set; }
+        public string? TurnCount { get; set; }
+        public string? RoadWidth { get; set; }
+        public string? AvgTimeSec { get; set; }
+        public string? WorldRecord { get; set; }
+        public string? WrVehicle { get; set; }
+        public string? WrTuning { get; set; }
+        public string? CarClassBest { get; set; }
+        public string? CarTypeBest { get; set; }
+        public string? Region { get; set; }
+        public string? SeasonBest { get; set; }
+        public string? WeatherDefault { get; set; }
+        public string? NightMode { get; set; }
+        public string? Dlc { get; set; }
+        public string? IsReverse { get; set; }
+        public string? ImageUrl { get; set; }
+        public string? MinimapUrl { get; set; }
+        public string? Notes { get; set; }
+    }
 }

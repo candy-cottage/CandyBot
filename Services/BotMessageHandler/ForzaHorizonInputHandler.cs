@@ -23,12 +23,8 @@ public partial class CandyBotService
         {
             if (e.Detail == "地平线")
             {
-                md.Content = $"🥯{"糖果屋".CreateCmdInput()}🍧提供《极限竞速：地平线6》的相关查询功能哦，欢迎体验～\r\n测试中，不代表最终品质；数据来源于ZGC车队的调校摸索表格，如有疑问请联系QQ：3305106902。";
-                reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(3,
-                        Button.CreateCmdButton("🏎 查车", "查车", false),
-                        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                        Button.CreateCmdButton("📊 查等级", "查等级", false));
+                md.Content = $"🥯{"糖果屋".CreateCmdInput()}🍧提供《极限竞速：地平线6》的相关查询功能哦，欢迎体验～\r\n测试中，不代表最终品质，如有疑问请联系维护者QQ：3305106902。\r\n**鸣谢**\r\n开发者：Mili's Candy Cottage\r\ngithub@milimoe、github@iHaydenzZ\r\n车辆调校数据来源：ZGC俱乐部《地平线6车辆摸索》\r\n赛道数据来源：ThickSea214561《FH6赛道名称中英文对照表》";
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -82,15 +78,45 @@ public partial class CandyBotService
                 return true;
             }
 
-            // 占位：查赛道尚未实现
             if (e.Detail.StartsWith("查赛道"))
             {
-                md.Content = "🛣️ 赛道查询功能正在开发中，敬请期待～";
-                reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(3,
-                        Button.CreateCmdButton("🏎 查车", "查车", false),
-                        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                        Button.CreateCmdButton("📊 查等级", "查等级", false));
+                string detail = e.Detail["查赛道".Length..].Trim();
+                reply.Keyboard = new KeyboardMessage();
+
+                // 分离页码
+                string[] tokens = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                int page = 1;
+                string queryStr = detail;
+                if (tokens.Length > 0 && int.TryParse(tokens[^1], out int lastNum))
+                {
+                    page = lastNum;
+                    queryStr = string.Join(" ", tokens.Take(tokens.Length - 1)).Trim();
+                }
+
+                if (string.IsNullOrEmpty(queryStr))
+                {
+                    md.Content = "格式：查赛道 <关键字> [页码]\r\n" +
+                                 "示例：查赛道 白川\r\n" +
+                                 "示例：查赛道 Shirakawa\r\n" +
+                                 "支持按中文名、英文名、别名搜索。";
+                    reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                var (success, msg, data, totalPages) = forzaService.SearchMaps(queryStr, page);
+                if (success && data != null)
+                {
+                    string cards = ForzaService.RenderMapsAsCards(data);
+                    md.Content = $"🛣️ 查询结果（{page} / {totalPages} 页）\r\n{cards}";
+                    if (totalPages > 1)
+                        reply.Keyboard.AddPaginationRow($"查赛道 {queryStr} ", page, totalPages);
+                }
+                else
+                {
+                    md.Content = msg;
+                }
+                reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -122,7 +148,7 @@ public partial class CandyBotService
                         "示例：查车 FXX\r\n" +
                         "示例：查车 法拉利FXX\r\n" +
                         "支持模糊查询，如：查车 FX。";
-                    reply.Keyboard.AppendButtonsWithNewRow(3, buttons);
+                    reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -144,7 +170,7 @@ public partial class CandyBotService
                 {
                     reply.Keyboard.AddPaginationRow($"查车 {queryStr} ", page, totalPages);
                 }
-                reply.Keyboard.AppendButtonsWithNewRow(3, buttons);
+                reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -158,11 +184,7 @@ public partial class CandyBotService
                                  "示例：查等级 S1 公路\r\n" +
                                  "示例：查等级 A\r\n" +
                                  "示例：查等级 越野\r\n";
-                    reply.Keyboard = new KeyboardMessage()
-                        .AppendButtons(3,
-                            Button.CreateCmdButton("🏎 查车", "查车", false),
-                            Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                            Button.CreateCmdButton("📊 查等级", "查等级", false));
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -225,10 +247,7 @@ public partial class CandyBotService
                 {
                     reply.Keyboard.AddPaginationRow(baseCmd + " ", page, totalPages);
                 }
-                reply.Keyboard.AppendButtonsWithNewRow(3,
-                    Button.CreateCmdButton("🏎 查车", "查车", false),
-                    Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                    Button.CreateCmdButton("📊 查等级", "查等级", false));
+                reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
 
                 await botService.SendAsync(e, reply);
                 return true;
@@ -281,11 +300,7 @@ public partial class CandyBotService
                 }
 
                 md.Content = "车辆信息修改成功。";
-                reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(3,
-                        Button.CreateCmdButton("🏎 查车", "查车", false),
-                        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                        Button.CreateCmdButton("📊 查等级", "查等级", false));
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -344,10 +359,7 @@ public partial class CandyBotService
                     }
                 }
 
-                reply.Keyboard.AppendButtons(3,
-                    Button.CreateCmdButton("🏎 查车", "查车", false),
-                    Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                    Button.CreateCmdButton("📊 查等级", "查等级", false));
+                reply.Keyboard.AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -391,11 +403,7 @@ public partial class CandyBotService
                 {
                     var (success, msg, deletedCount) = forzaService.DeleteVehiclesByIds(ids);
                     md.Content = success ? $"✅ {msg}" : $"❌ {msg}";
-                    reply.Keyboard = new KeyboardMessage()
-                        .AppendButtons(3,
-                            Button.CreateCmdButton("🏎 查车", "查车", false),
-                            Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                            Button.CreateCmdButton("📊 查等级", "查等级", false));
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -425,9 +433,12 @@ public partial class CandyBotService
                 }
                 sb.AppendLine("\n是否确认删除以上所有车辆？");
 
+                // 将匹配到的 ID 列表编码进确认按钮，关闭 TOCTOU 窗口
+                string idListPayload = string.Join(",", matches.Select(m => m.Id.ToString()));
+
                 md.Content = sb.ToString();
                 reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(1, Button.CreateCmdButton("✅ 确认删除", e.Detail, false));  // 携带原始参数
+                    .AppendButtons(1, Button.CreateCmdButton("✅ 确认删除", "确认删除车辆 " + idListPayload, false));
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -438,22 +449,189 @@ public partial class CandyBotService
                     return true;
 
                 string detail = e.Detail["确认删除车辆".Length..].Trim();
-                if (string.IsNullOrEmpty(detail))
+                // 解析逗号分隔的 ID 列表
+                List<int> idsToDelete = [];
+                foreach (string token in detail.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries))
                 {
-                    md.Content = "请提供要删除的车辆信息，例如：确认删除车辆 制造商=xxx ...";
+                    if (int.TryParse(token, out int id) && id > 0)
+                        idsToDelete.Add(id);
+                }
+
+                if (idsToDelete.Count == 0)
+                {
+                    md.Content = "未找到有效的车辆 ID，请重新执行删除车辆操作。";
                     await botService.SendAsync(e, reply);
                     return true;
                 }
 
-                // 重新解析字段
-                VehicleRequest request = new();
-                if (!ParseKeyValuePairs(detail, request, out string parseError))
+                var (delSuccess, delMsg, _) = forzaService.DeleteVehiclesByIds(idsToDelete);
+                if (delSuccess)
+                {
+                    md.Content = $"✅ 已删除 {idsToDelete.Count} 辆车。";
+                }
+                else
+                {
+                    md.Content = $"❌ 删除失败：{delMsg}";
+                }
+
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            // ========== 赛道管理（管理员） ==========
+
+            if (e.Detail.StartsWith("新增赛道"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["新增赛道".Length..].Trim();
+                if (string.IsNullOrEmpty(detail))
+                {
+                    await botService.SendAsync(e,
+                        "格式：新增赛道 中文名=xxx 英文名=xxx 路线类型=xxx 长度=xxx [其他参数]\r\n" +
+                        "必填字段：中文名、英文名、路线类型（circuit/sprint）、长度（数字）\r\n" +
+                        "可用参数：中文名= 英文名= 别名= 长度= 路线类型= 路面= 赛事大类= 赛道特性= 难度= 海拔= 弯道数= 路宽= 圈速= 世界纪录= WR车辆= WR调校= 推荐等级= 推荐车型= 区域= 最佳赛季= 天气= 夜间= DLC= 反向= 图片URL= 小地图URL= 备注=\r\n" +
+                        "别名支持逗号/顿号分隔，自动编码为 JSON 数组。含空格的英文名请加引号。\r\n" +
+                        "路线类型：circuit=圈图, sprint=冲刺图\r\n" +
+                        "路面：asphalt/dirt/gravel/sand/mixed/snow/cross_country\r\n" +
+                        "赛事大类：road/dirt/cross_country/street/drag/rally/showcase/mountain_road（峠道）\r\n" +
+                        "赛道特性：handling/speed/balanced/offroad/drift/technical\r\n" +
+                        "示例：新增赛道 中文名=海滨冲刺 英文名=\"Coastal Sprint\" 路线类型=sprint 长度=8.4 路面=asphalt 赛道特性=speed 难度=2 区域=Pacific Coast");
+                    return true;
+                }
+
+                MapRequest mapRequest = new();
+                if (!ParseMapKeyValuePairs(detail, mapRequest, out string parseError))
                 {
                     await botService.SendAsync(e, parseError);
                     return true;
                 }
 
-                var (findSuccess, findMsg, matches) = forzaService.FindVehiclesByCriteria(request);
+                if (string.IsNullOrEmpty(mapRequest.NameZh) || string.IsNullOrEmpty(mapRequest.NameEn) ||
+                    string.IsNullOrEmpty(mapRequest.RouteType) || string.IsNullOrEmpty(mapRequest.LengthKm))
+                {
+                    md.Content = "缺少必填字段：中文名、英文名、路线类型、长度都必须提供。";
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(1, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                reply.Keyboard = new KeyboardMessage();
+                if (forzaService.AddMap(mapRequest, out string addError))
+                {
+                    md.Content = "✅ 赛道新增成功！";
+                }
+                else
+                {
+                    md.Content = $"❌ 新增失败：{addError}";
+                }
+
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            if (e.Detail.StartsWith("修改赛道"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["修改赛道".Length..].Trim();
+                string[] parts = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 1)
+                {
+                    await botService.SendAsync(e,
+                        "格式：修改赛道 <赛道ID> [参数=值]\r\n" +
+                        "可用参数：中文名= 英文名= 别名= 长度= 路线类型= 路面= 赛事大类= 赛道特性= 难度= 海拔= 弯道数= 路宽= 圈速= 世界纪录= WR车辆= WR调校= 推荐等级= 推荐车型= 区域= 最佳赛季= 天气= 夜间= DLC= 反向= 图片URL= 小地图URL= 备注=\r\n" +
+                        "示例：修改赛道 1 难度=4 赛道特性=technical");
+                    return true;
+                }
+
+                MapRequest mapRequest = new();
+                if (int.TryParse(parts[0], out int mid))
+                {
+                    mapRequest.Id = mid;
+                    string remaining = string.Join(" ", parts[1..]);
+                    if (!ParseMapKeyValuePairs(remaining, mapRequest, out string parseError))
+                    {
+                        await botService.SendAsync(e, parseError);
+                        return true;
+                    }
+                }
+                else
+                {
+                    md.Content = "请提供赛道 ID。";
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                if (!forzaService.UpdateMap(mapRequest, out string updateError))
+                {
+                    md.Content = updateError;
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                md.Content = "赛道信息修改成功。";
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            if (e.Detail.StartsWith("删除赛道"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["删除赛道".Length..].Trim();
+                if (string.IsNullOrEmpty(detail))
+                {
+                    await botService.SendAsync(e,
+                        "格式：\n" +
+                        "1. 按 ID 删除：删除赛道 <id> [id2 id3 ...]\n" +
+                        "   示例：删除赛道 1\n" +
+                        "   示例：删除赛道 1 2 3\n" +
+                        "2. 按字段删除：删除赛道 中文名=xxx 路线类型=xxx 区域=xxx\n" +
+                        "   示例：删除赛道 中文名=海滨冲刺 路线类型=sprint\n" +
+                        "   ⚠️ 按字段删除会列出所有匹配的赛道并需要二次确认。");
+                    return true;
+                }
+
+                string[] delParts = detail.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
+                List<int> ids = [];
+                bool allAreNumbers = true;
+                foreach (string p in delParts)
+                {
+                    if (int.TryParse(p, out int id))
+                        ids.Add(id);
+                    else
+                    {
+                        allAreNumbers = false;
+                        break;
+                    }
+                }
+
+                if (allAreNumbers && ids.Count > 0)
+                {
+                    var (delSuccess, delMsg, _) = forzaService.DeleteMapsByIds(ids);
+                    md.Content = delSuccess ? $"✅ {delMsg}" : $"❌ {delMsg}";
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                MapRequest mapDelRequest = new();
+                if (!ParseMapKeyValuePairs(detail, mapDelRequest, out string parseError2))
+                {
+                    await botService.SendAsync(e, parseError2);
+                    return true;
+                }
+
+                var (findSuccess, findMsg, matches) = forzaService.FindMapsByCriteria(mapDelRequest);
                 if (!findSuccess || matches == null || matches.Count == 0)
                 {
                     md.Content = findMsg;
@@ -461,23 +639,54 @@ public partial class CandyBotService
                     return true;
                 }
 
-                // 批量删除所有匹配的ID
-                List<int> idsToDelete = [.. matches.Select(m => m.Id)];
-                var (delSuccess, delMsg, _) = forzaService.DeleteVehiclesByIds(idsToDelete);
+                StringBuilder sb = new();
+                sb.AppendLine($"⚠️ 找到 {matches.Count} 条匹配的赛道：");
+                foreach (ForzaService.MapMatch m in matches)
+                    sb.AppendLine($"• ID {m.Id}：{m.DisplayName}");
+                sb.AppendLine("\n是否确认删除以上所有赛道？");
+
+                // 将匹配到的 ID 列表编码进确认按钮，关闭 TOCTOU 窗口
+                string idListPayload = string.Join(",", matches.Select(m => m.Id.ToString()));
+
+                md.Content = sb.ToString();
+                reply.Keyboard = new KeyboardMessage()
+                    .AppendButtons(1, Button.CreateCmdButton("✅ 确认删除赛道", "确认删除赛道 " + idListPayload, false));
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            if (e.Detail.StartsWith("确认删除赛道"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["确认删除赛道".Length..].Trim();
+                // 解析逗号分隔的 ID 列表
+                List<int> idsToDelete = [];
+                foreach (string token in detail.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (int.TryParse(token, out int id) && id > 0)
+                        idsToDelete.Add(id);
+                }
+
+                if (idsToDelete.Count == 0)
+                {
+                    md.Content = "未找到有效的赛道 ID，请重新执行删除赛道操作。";
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                var (delSuccess, delMsg, _) = forzaService.DeleteMapsByIds(idsToDelete);
                 if (delSuccess)
                 {
-                    md.Content = $"✅ 已删除 {matches.Count} 辆车：\n" + string.Join("\n", matches.Select(m => $"• ID {m.Id}：{m.DisplayName}"));
+                    md.Content = $"✅ 已删除 {idsToDelete.Count} 条赛道。";
                 }
                 else
                 {
                     md.Content = $"❌ 删除失败：{delMsg}";
                 }
 
-                reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(3,
-                        Button.CreateCmdButton("🏎 查车", "查车", false),
-                        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                        Button.CreateCmdButton("📊 查等级", "查等级", false));
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -614,4 +823,139 @@ public partial class CandyBotService
 
         return (matchedManufacturer, remaining);
     }
+
+    private static bool ParseMapKeyValuePairs(string input, MapRequest request, out string error)
+    {
+        error = "";
+        System.Text.RegularExpressions.MatchCollection matches = GetParamValue().Matches(input);
+        foreach (System.Text.RegularExpressions.Match m in matches)
+        {
+            string key = m.Groups[1].Value.ToLowerInvariant();
+            string val = m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Value;
+
+            switch (key)
+            {
+                case "中文名":
+                case "namezh":
+                    request.NameZh = val;
+                    break;
+                case "英文名":
+                case "nameen":
+                    request.NameEn = val;
+                    break;
+                case "别名":
+                case "aliases":
+                    request.Aliases = val;
+                    break;
+                case "长度":
+                case "lengthkm":
+                    request.LengthKm = val;
+                    break;
+                case "路线类型":
+                case "routetype":
+                    request.RouteType = val;
+                    break;
+                case "路面":
+                case "surface":
+                    request.Surface = val;
+                    break;
+                case "赛事大类":
+                case "racecategory":
+                    request.RaceCategory = val == "峠道" ? "mountain_road" : val;
+                    break;
+                case "赛道特性":
+                case "characteristic":
+                    request.Characteristic = val;
+                    break;
+                case "难度":
+                case "difficulty":
+                    request.Difficulty = val;
+                    break;
+                case "海拔":
+                case "elevation":
+                    request.Elevation = val;
+                    break;
+                case "弯道数":
+                case "弯道":
+                case "turncount":
+                    request.TurnCount = val;
+                    break;
+                case "路宽":
+                case "roadwidth":
+                    request.RoadWidth = val;
+                    break;
+                case "圈速":
+                case "avgtimesec":
+                    request.AvgTimeSec = val;
+                    break;
+                case "世界纪录":
+                case "worldrecord":
+                    request.WorldRecord = val;
+                    break;
+                case "wr车辆":
+                case "wrvehicle":
+                    request.WrVehicle = val;
+                    break;
+                case "wr调校":
+                case "wrtuning":
+                    request.WrTuning = val;
+                    break;
+                case "推荐等级":
+                case "carclassbest":
+                    request.CarClassBest = val;
+                    break;
+                case "推荐车型":
+                case "cartypebest":
+                    request.CarTypeBest = val;
+                    break;
+                case "区域":
+                case "region":
+                    request.Region = val;
+                    break;
+                case "最佳赛季":
+                case "seasonbest":
+                    request.SeasonBest = val;
+                    break;
+                case "天气":
+                case "weatherdefault":
+                    request.WeatherDefault = val;
+                    break;
+                case "夜间":
+                case "nightmode":
+                    request.NightMode = val;
+                    break;
+                case "dlc":
+                    request.Dlc = val;
+                    break;
+                case "反向":
+                case "isreverse":
+                    request.IsReverse = val;
+                    break;
+                case "图片url":
+                case "imageurl":
+                    request.ImageUrl = val;
+                    break;
+                case "小地图url":
+                case "minimapurl":
+                    request.MinimapUrl = val;
+                    break;
+                case "备注":
+                case "notes":
+                    request.Notes = val;
+                    break;
+                default:
+                    error = $"未知参数：{key}";
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<Button> ForzaNavButtons() =>
+    [
+        Button.CreateCmdButton("🌟 地平线", "地平线", false),
+        Button.CreateCmdButton("🏎 查车", "查车", false),
+        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
+        Button.CreateCmdButton("📊 查等级", "查等级", false),
+    ];
 }
