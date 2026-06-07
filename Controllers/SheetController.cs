@@ -1,9 +1,11 @@
 ﻿using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services.BotServices;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CandyCottage.CandyBot.Controllers
 {
+    [Authorize(Roles = "Admin")]
     [ApiController]
     [Route("[controller]")]
     public class SheetController(ILogger<SheetController> logger, SheetService service) : Controller
