@@ -14,7 +14,7 @@ namespace CandyCottage.CandyBot.Services
     public partial class CandyBotService(ILogger<CandyBotService> logger, IMemoryCache memoryCache, SQLHelper sql, CandyBotFunctionConfig functionConfig, ForzaConfig forzaConfig,
         IBackgroundTaskQueue taskQueue, ITaskSchedulerManager taskManager,
         IBotReplySender botService, BettingService bettingService, SQLTableInitializeService sqlInitService, UserService userService, ForzaService forzaService,
-        IForzaSheetImporter forzaSheetImporter, Esports.EsportsSyncService esportsSyncService, UserAPITokenService userAPITokenService)
+        IForzaSheetImporter forzaSheetImporter, Esports.EsportsSyncService esportsSyncService, UserAPITokenService userAPITokenService, MapService mapService)
     {
         public async Task Handler(IBotMessage e)
         {
