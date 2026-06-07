@@ -88,7 +88,6 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
             userService: null!,
             forzaService: null!,
             forzaSheetImporter: null!,
-            mapService: null!,
             esportsSyncService: new EsportsSyncService(
                 NullLogger<EsportsSyncService>.Instance,
                 sql,

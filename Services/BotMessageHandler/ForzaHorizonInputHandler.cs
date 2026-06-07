@@ -113,10 +113,10 @@ public partial class CandyBotService
                     return true;
                 }
 
-                var (success, msg, data, totalPages) = mapService.SearchMaps(queryStr, page);
+                var (success, msg, data, totalPages) = forzaService.SearchMaps(queryStr, page);
                 if (success && data != null)
                 {
-                    string cards = MapService.RenderMapsAsCards(data);
+                    string cards = ForzaService.RenderMapsAsCards(data);
                     md.Content = $"🛣️ 查询结果（{page} / {totalPages} 页）\r\n{cards}";
                     if (totalPages > 1)
                         reply.Keyboard.AddPaginationRow($"查赛道 {queryStr} ", page, totalPages);
@@ -555,7 +555,7 @@ public partial class CandyBotService
                 }
 
                 reply.Keyboard = new KeyboardMessage();
-                if (mapService.AddMap(mapRequest, out string addError))
+                if (forzaService.AddMap(mapRequest, out string addError))
                 {
                     md.Content = "✅ 赛道新增成功！";
                 }
@@ -607,7 +607,7 @@ public partial class CandyBotService
                     return true;
                 }
 
-                if (!mapService.UpdateMap(mapRequest, out string updateError))
+                if (!forzaService.UpdateMap(mapRequest, out string updateError))
                 {
                     md.Content = updateError;
                     reply.Keyboard = new KeyboardMessage().AppendButtons(2, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
@@ -660,7 +660,7 @@ public partial class CandyBotService
 
                 if (allAreNumbers && ids.Count > 0)
                 {
-                    var (delSuccess, delMsg, _) = mapService.DeleteMapsByIds(ids);
+                    var (delSuccess, delMsg, _) = forzaService.DeleteMapsByIds(ids);
                     md.Content = delSuccess ? $"✅ {delMsg}" : $"❌ {delMsg}";
                     reply.Keyboard = new KeyboardMessage()
                         .AppendButtons(3,
@@ -678,7 +678,7 @@ public partial class CandyBotService
                     return true;
                 }
 
-                var (findSuccess, findMsg, matches) = mapService.FindMapsByCriteria(mapDelRequest);
+                var (findSuccess, findMsg, matches) = forzaService.FindMapsByCriteria(mapDelRequest);
                 if (!findSuccess || matches == null || matches.Count == 0)
                 {
                     md.Content = findMsg;
@@ -688,7 +688,7 @@ public partial class CandyBotService
 
                 StringBuilder sb = new();
                 sb.AppendLine($"⚠️ 找到 {matches.Count} 条匹配的赛道：");
-                foreach (MapService.MapMatch m in matches)
+                foreach (ForzaService.MapMatch m in matches)
                     sb.AppendLine($"• ID {m.Id}：{m.DisplayName}");
                 sb.AppendLine("\n是否确认删除以上所有赛道？");
 
@@ -719,7 +719,7 @@ public partial class CandyBotService
                     return true;
                 }
 
-                var (findSuccess, findMsg, matches) = mapService.FindMapsByCriteria(mapConfirmRequest);
+                var (findSuccess, findMsg, matches) = forzaService.FindMapsByCriteria(mapConfirmRequest);
                 if (!findSuccess || matches == null || matches.Count == 0)
                 {
                     md.Content = findMsg;
@@ -728,7 +728,7 @@ public partial class CandyBotService
                 }
 
                 List<int> idsToDelete = [.. matches.Select(m => m.Id)];
-                var (delSuccess, delMsg, _) = mapService.DeleteMapsByIds(idsToDelete);
+                var (delSuccess, delMsg, _) = forzaService.DeleteMapsByIds(idsToDelete);
                 if (delSuccess)
                 {
                     md.Content = $"✅ 已删除 {matches.Count} 条赛道：\n" + string.Join("\n", matches.Select(m => $"• ID {m.Id}：{m.DisplayName}"));

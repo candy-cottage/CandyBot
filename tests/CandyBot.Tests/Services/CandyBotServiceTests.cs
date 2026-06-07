@@ -45,8 +45,7 @@ public class CandyBotServiceTests
             forzaService: null!,
             forzaSheetImporter,
             esportsSyncService: null!,
-            userAPITokenService: null!,
-            mapService: null!);
+            userAPITokenService: null!);
 
     private static MemoryCache NewCache() => new(new MemoryCacheOptions());
 

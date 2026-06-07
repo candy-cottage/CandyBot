@@ -87,8 +87,7 @@ public class BettingScopeFilterCommandTests
             forzaService: null!,
             forzaSheetImporter: null!,
             esportsSyncService,
-            userAPITokenService: null!,
-            mapService: null!);
+            userAPITokenService: null!);
     }
 
     private static Task WithTempPluginRoot(Func<PandaScoreConfig, Task> body)
