@@ -407,7 +407,6 @@ namespace CandyCottage.CandyBot.Services
             try
             {
                 sql.NewTransaction();
-                string idList = string.Join(",", ids);
                 string inClause = string.Join(",", ids.Select((_, i) => $"@id{i}"));
                 for (int i = 0; i < ids.Count; i++)
                 {
@@ -739,7 +738,7 @@ namespace CandyCottage.CandyBot.Services
                 AddField(columns, values, "LengthKm", request.LengthKm);
                 AddField(columns, values, "RouteType", request.RouteType);
                 AddField(columns, values, "Surface", request.Surface);
-                AddField(columns, values, "RaceCategory", request.RaceCategory);
+                AddField(columns, values, "RaceCategory", request.RaceCategory ?? "road");
                 AddField(columns, values, "Characteristic", request.Characteristic);
                 AddField(columns, values, "Difficulty", request.Difficulty);
                 AddField(columns, values, "Elevation", request.Elevation);
@@ -781,6 +780,8 @@ namespace CandyCottage.CandyBot.Services
         public bool UpdateMap(MapRequest request, out string error)
         {
             error = "";
+            if (!ValidateNumericFields(request, out error))
+                return false;
             try
             {
                 sql.NewTransaction();

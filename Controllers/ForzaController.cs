@@ -84,10 +84,11 @@ namespace CandyCottage.CandyBot.Controllers
         public IActionResult DeleteVehicle(int id)
         {
             var (success, message, deletedCount) = forzaService.DeleteVehiclesByIds([id]);
-            if (success && deletedCount > 0)
-                return Ok(new { success = true, message = $"已删除车辆 ID {id}" });
-            else
+            if (!success)
+                return BadRequest(new { success = false, message });
+            if (deletedCount == 0)
                 return NotFound(new { success = false, message });
+            return Ok(new { success = true, message = $"已删除车辆 ID {id}" });
         }
 
         [Authorize(Roles = "admin,op")]
@@ -102,10 +103,9 @@ namespace CandyCottage.CandyBot.Controllers
                 return BadRequest(new { success = false, message = "ids 中未包含有效的数字 ID" });
 
             var (success, message, deletedCount) = forzaService.DeleteVehiclesByIds(idList);
-            if (success)
-                return Ok(new { success = true, message = $"成功删除 {deletedCount} 辆车" });
-            else
-                return BadRequest(new { success = false });
+            if (!success)
+                return BadRequest(new { success = false, message });
+            return Ok(new { success = true, message = $"成功删除 {deletedCount} 辆车" });
         }
 
         [Authorize(Roles = "admin,op")]
@@ -221,10 +221,11 @@ namespace CandyCottage.CandyBot.Controllers
         public IActionResult DeleteMap(int id)
         {
             var (success, message, deletedCount) = forzaService.DeleteMapsByIds([id]);
-            if (success && deletedCount > 0)
-                return Ok(new { success = true, message = $"已删除赛道 ID {id}" });
-            else
-                return NotFound(new { success = false });
+            if (!success)
+                return BadRequest(new { success = false, message });
+            if (deletedCount == 0)
+                return NotFound(new { success = false, message });
+            return Ok(new { success = true, message = $"已删除赛道 ID {id}" });
         }
 
         [Authorize(Roles = "admin,op")]
@@ -239,10 +240,9 @@ namespace CandyCottage.CandyBot.Controllers
                 return BadRequest(new { success = false, message = "ids 中未包含有效的数字 ID" });
 
             var (success, message, deletedCount) = forzaService.DeleteMapsByIds(idList);
-            if (success)
-                return Ok(new { success = true, message = $"成功删除 {deletedCount} 条赛道" });
-            else
-                return BadRequest(new { success = false });
+            if (!success)
+                return BadRequest(new { success = false, message });
+            return Ok(new { success = true, message = $"成功删除 {deletedCount} 条赛道" });
         }
 
         [Authorize(Roles = "admin,op")]

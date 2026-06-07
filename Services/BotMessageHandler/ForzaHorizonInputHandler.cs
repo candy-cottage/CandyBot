@@ -465,9 +465,12 @@ public partial class CandyBotService
                 }
                 sb.AppendLine("\n是否确认删除以上所有车辆？");
 
+                // 将匹配到的 ID 列表编码进确认按钮，关闭 TOCTOU 窗口
+                string idListPayload = string.Join(",", matches.Select(m => m.Id.ToString()));
+
                 md.Content = sb.ToString();
                 reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(1, Button.CreateCmdButton("✅ 确认删除", e.Detail, false));  // 携带原始参数
+                    .AppendButtons(1, Button.CreateCmdButton("✅ 确认删除", "确认删除车辆 " + idListPayload, false));
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -478,35 +481,25 @@ public partial class CandyBotService
                     return true;
 
                 string detail = e.Detail["确认删除车辆".Length..].Trim();
-                if (string.IsNullOrEmpty(detail))
+                // 解析逗号分隔的 ID 列表
+                List<int> idsToDelete = [];
+                foreach (string token in detail.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries))
                 {
-                    md.Content = "请提供要删除的车辆信息，例如：确认删除车辆 制造商=xxx ...";
+                    if (int.TryParse(token, out int id) && id > 0)
+                        idsToDelete.Add(id);
+                }
+
+                if (idsToDelete.Count == 0)
+                {
+                    md.Content = "未找到有效的车辆 ID，请重新执行删除车辆操作。";
                     await botService.SendAsync(e, reply);
                     return true;
                 }
 
-                // 重新解析字段
-                VehicleRequest request = new();
-                if (!ParseKeyValuePairs(detail, request, out string parseError))
-                {
-                    await botService.SendAsync(e, parseError);
-                    return true;
-                }
-
-                var (findSuccess, findMsg, matches) = forzaService.FindVehiclesByCriteria(request);
-                if (!findSuccess || matches == null || matches.Count == 0)
-                {
-                    md.Content = findMsg;
-                    await botService.SendAsync(e, reply);
-                    return true;
-                }
-
-                // 批量删除所有匹配的ID
-                List<int> idsToDelete = [.. matches.Select(m => m.Id)];
                 var (delSuccess, delMsg, _) = forzaService.DeleteVehiclesByIds(idsToDelete);
                 if (delSuccess)
                 {
-                    md.Content = $"✅ 已删除 {matches.Count} 辆车：\n" + string.Join("\n", matches.Select(m => $"• ID {m.Id}：{m.DisplayName}"));
+                    md.Content = $"✅ 已删除 {idsToDelete.Count} 辆车。";
                 }
                 else
                 {
