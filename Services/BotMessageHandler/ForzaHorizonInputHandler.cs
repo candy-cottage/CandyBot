@@ -26,10 +26,7 @@ public partial class CandyBotService
                 md.Content = $"🥯{"糖果屋".CreateCmdInput()}🍧提供《极限竞速：地平线6》的相关查询功能哦，欢迎体验～\r\n测试中，不代表最终品质，如有疑问请联系维护者QQ：3305106902。\r\n**鸣谢**\r\n开发者：Mili's Candy Cottage\r\ngithub@milimoe、github@iHaydenzZ\r\n车辆调校数据来源：ZGC俱乐部《地平线6车辆摸索》\r\n赛道数据来源：ThickSea214561《FH6赛道名称中英文对照表》";
                 reply.Keyboard = new KeyboardMessage()
                     .AppendButtons(2,
-                        Button.CreateCmdButton("🌟 地平线", "地平线", false),
-                        Button.CreateCmdButton("🏎 查车", "查车", false),
-                        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                        Button.CreateCmdButton("📊 查等级", "查等级", false));
+                        ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -196,10 +193,7 @@ public partial class CandyBotService
                                  "示例：查等级 越野\r\n";
                     reply.Keyboard = new KeyboardMessage()
                         .AppendButtons(2,
-                            Button.CreateCmdButton("🌟 地平线", "地平线", false),
-                            Button.CreateCmdButton("🏎 查车", "查车", false),
-                            Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                            Button.CreateCmdButton("📊 查等级", "查等级", false));
+                            ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -320,10 +314,7 @@ public partial class CandyBotService
                 md.Content = "车辆信息修改成功。";
                 reply.Keyboard = new KeyboardMessage()
                     .AppendButtons(2,
-                        Button.CreateCmdButton("🌟 地平线", "地平线", false),
-                        Button.CreateCmdButton("🏎 查车", "查车", false),
-                        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                        Button.CreateCmdButton("📊 查等级", "查等级", false));
+                        ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -432,10 +423,7 @@ public partial class CandyBotService
                     md.Content = success ? $"✅ {msg}" : $"❌ {msg}";
                     reply.Keyboard = new KeyboardMessage()
                         .AppendButtons(2,
-                            Button.CreateCmdButton("🌟 地平线", "地平线", false),
-                            Button.CreateCmdButton("🏎 查车", "查车", false),
-                            Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                            Button.CreateCmdButton("📊 查等级", "查等级", false));
+                            ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -508,10 +496,7 @@ public partial class CandyBotService
 
                 reply.Keyboard = new KeyboardMessage()
                     .AppendButtons(2,
-                        Button.CreateCmdButton("🌟 地平线", "地平线", false),
-                        Button.CreateCmdButton("🏎 查车", "查车", false),
-                        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                        Button.CreateCmdButton("📊 查等级", "查等级", false));
+                        ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -566,10 +551,7 @@ public partial class CandyBotService
                 }
 
                 reply.Keyboard.AppendButtons(2,
-                    Button.CreateCmdButton("🌟 地平线", "地平线", false),
-                    Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                    Button.CreateCmdButton("🏎 查车", "查车", false),
-                    Button.CreateCmdButton("📊 查等级", "查等级", false));
+                    ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -620,10 +602,7 @@ public partial class CandyBotService
                 md.Content = "赛道信息修改成功。";
                 reply.Keyboard = new KeyboardMessage()
                     .AppendButtons(2,
-                        Button.CreateCmdButton("🌟 地平线", "地平线", false),
-                        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                        Button.CreateCmdButton("🏎 查车", "查车", false),
-                        Button.CreateCmdButton("📊 查等级", "查等级", false));
+                        ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -667,10 +646,7 @@ public partial class CandyBotService
                     md.Content = delSuccess ? $"✅ {delMsg}" : $"❌ {delMsg}";
                     reply.Keyboard = new KeyboardMessage()
                         .AppendButtons(2,
-                            Button.CreateCmdButton("🌟 地平线", "地平线", false),
-                            Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                            Button.CreateCmdButton("🏎 查车", "查车", false),
-                            Button.CreateCmdButton("📊 查等级", "查等级", false));
+                            ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
@@ -739,10 +715,7 @@ public partial class CandyBotService
 
                 reply.Keyboard = new KeyboardMessage()
                     .AppendButtons(2,
-                        Button.CreateCmdButton("🌟 地平线", "地平线", false),
-                        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
-                        Button.CreateCmdButton("🏎 查车", "查车", false),
-                        Button.CreateCmdButton("📊 查等级", "查等级", false));
+                        ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -1006,4 +979,12 @@ public partial class CandyBotService
         }
         return true;
     }
+
+    private static List<Button> ForzaNavButtons() =>
+    [
+        Button.CreateCmdButton("🌟 地平线", "地平线", false),
+        Button.CreateCmdButton("🏎 查车", "查车", false),
+        Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),
+        Button.CreateCmdButton("📊 查等级", "查等级", false),
+    ];
 }
