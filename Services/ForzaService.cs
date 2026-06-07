@@ -990,33 +990,33 @@ namespace CandyCottage.CandyBot.Services
                 string rc = Cell("RaceCategory");
                 if (rc != "") extra.Add(T(RaceCategoryLabel, rc));
                 string rw = Cell("RoadWidth");
-                if (rw != "") extra.Add($"路宽: {T(RoadWidthLabel, rw)}");
+                if (rw != "") extra.Add($"路宽：{T(RoadWidthLabel, rw)}");
                 AppendLineIfAny(sb, string.Join(" · ", extra));
 
                 // 推荐车辆等级 / 类型
                 List<string> recommends = [];
-                if (Cell("CarClassBest") != "") recommends.Add($"等级推荐: {Cell("CarClassBest")}");
-                if (Cell("CarTypeBest") != "") recommends.Add($"车型推荐: {Cell("CarTypeBest")}");
+                if (Cell("CarClassBest") != "") recommends.Add($"等级推荐：{Cell("CarClassBest")}");
+                if (Cell("CarTypeBest") != "") recommends.Add($"车型推荐：{Cell("CarTypeBest")}");
                 AppendLineIfAny(sb, string.Join(" | ", recommends));
 
                 // 最佳赛季 | 默认天气
                 List<string> env = [];
                 string sb2 = Cell("SeasonBest");
-                if (sb2 != "") env.Add($"最佳赛季: {T(SeasonLabel, sb2)}");
+                if (sb2 != "") env.Add($"最佳赛季：{T(SeasonLabel, sb2)}");
                 string wd = Cell("WeatherDefault");
-                if (wd != "") env.Add($"天气: {T(WeatherLabel, wd)}");
+                if (wd != "") env.Add($"天气：{T(WeatherLabel, wd)}");
                 AppendLineIfAny(sb, string.Join(" · ", env));
 
                 // 区域 | DLC
                 List<string> loc = [];
                 if (Cell("Region") != "") loc.Add(Cell("Region"));
-                if (Cell("Dlc") != "") loc.Add($"DLC: {Cell("Dlc")}");
+                if (Cell("Dlc") != "") loc.Add($"DLC：{Cell("Dlc")}");
                 AppendLineIfAny(sb, string.Join(" · ", loc));
 
                 // 世界纪录
                 if (Cell("WorldRecord") != "")
                 {
-                    string wrLine = $"🏆 世界纪录: {Cell("WorldRecord")}";
+                    string wrLine = $"🏆 世界纪录：{Cell("WorldRecord")}";
                     if (Cell("WrVehicle") != "") wrLine += $" · {Cell("WrVehicle")}";
                     AppendLineIfAny(sb, wrLine);
                 }

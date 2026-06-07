@@ -106,8 +106,8 @@ public partial class CandyBotService
                 if (string.IsNullOrEmpty(queryStr))
                 {
                     md.Content = "格式：查赛道 <关键字> [页码]\r\n" +
-                                 "示例：查赛道 海滨\r\n" +
-                                 "示例：查赛道 volcano\r\n" +
+                                 "示例：查赛道 白川\r\n" +
+                                 "示例：查赛道 Shirakawa\r\n" +
                                  "支持按中文名、英文名、别名搜索。";
                     reply.Keyboard.AppendButtonsWithNewRow(3, buttons);
                     await botService.SendAsync(e, reply);
