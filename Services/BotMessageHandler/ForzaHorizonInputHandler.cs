@@ -533,7 +533,7 @@ public partial class CandyBotService
                         "可用参数：中文名= 英文名= 别名= 长度(km)= 路线类型= 路面= 赛事大类= 赛道特性= 难度= 海拔= 弯道数= 路宽= 圈速(秒)= 世界纪录= WR车辆= WR调校= 推荐等级= 推荐车型= 区域= 最佳赛季= 天气= 夜间= DLC= 反向= 图片URL= 小地图URL= 备注=\r\n" +
                         "路线类型：circuit=圈图, sprint=冲刺图\r\n" +
                         "路面：asphalt/dirt/gravel/sand/mixed/snow/cross_country\r\n" +
-                        "赛事大类：road/dirt/cross_country/street/drag/rally/showcase\r\n" +
+                        "赛事大类：road/dirt/cross_country/street/drag/rally/showcase/mountain_road（峠道）\r\n" +
                         "赛道特性：handling/speed/balanced/offroad/drift/technical\r\n" +
                         "示例：新增赛道 中文名=海滨冲刺 英文名=Coastal Sprint 路线类型=sprint 长度=8.4 路面=asphalt 赛道特性=speed 难度=2 区域=Pacific Coast");
                     return true;
@@ -918,7 +918,7 @@ public partial class CandyBotService
                     break;
                 case "赛事大类":
                 case "racecategory":
-                    request.RaceCategory = val;
+                    request.RaceCategory = val == "峠道" ? "mountain_road" : val;
                     break;
                 case "赛道特性":
                 case "characteristic":

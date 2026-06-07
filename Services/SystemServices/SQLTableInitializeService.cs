@@ -94,7 +94,7 @@ namespace CandyCottage.CandyBot.Services.SystemServices
     `LengthKm` DECIMAL(8,3) NOT NULL COMMENT '赛道长度（公里）',
     `RouteType` VARCHAR(20) NOT NULL DEFAULT 'circuit' COMMENT '路线类型：circuit=圈图, sprint=冲刺图',
     `Surface` VARCHAR(20) NOT NULL DEFAULT 'asphalt' COMMENT '路面类型：asphalt/dirt/gravel/sand/mixed/snow/cross_country',
-    `RaceCategory` VARCHAR(20) NOT NULL DEFAULT 'road' COMMENT '赛事大类：road/dirt/cross_country/street/drag/rally/showcase',
+    `RaceCategory` VARCHAR(20) NOT NULL DEFAULT 'road' COMMENT '赛事大类：road/dirt/cross_country/street/drag/rally/showcase/mountain_road',
     `Characteristic` VARCHAR(20) NOT NULL DEFAULT 'balanced' COMMENT '赛道特性：handling/speed/balanced/offroad/drift/technical',
     `Difficulty` TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '难度 1-5（1=新手, 5=专家）',
     `Elevation` VARCHAR(20) NOT NULL DEFAULT 'gentle' COMMENT '海拔变化：flat/gentle/hilly/mountainous',
