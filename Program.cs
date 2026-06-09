@@ -53,7 +53,9 @@ builder.Services.AddSingleton<SkillModule>();
 builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
 builder.Services.AddHostedService<QueuedHostedService>();
 builder.Services.AddSingleton<ITaskSchedulerManager, TaskSchedulerManager>();
-builder.Services.AddHostedService<TaskSchedulerService>();
+builder.Services.AddSingleton<TaskSchedulerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskSchedulerService>());
+builder.Services.AddSingleton<ITaskSchedulerExecutor>(sp => sp.GetRequiredService<TaskSchedulerService>());
 builder.Services.AddHostedService<SystemInitializeService>();
 builder.Services.AddScoped<MySQLHelper>();
 builder.Services.AddScoped<SQLiteHelper>();
@@ -98,16 +100,16 @@ builder.Services.AddHostedService<ConsoleInputService>();
 WebApplication app = builder.Build();
 
 app.UseCors("AllowAnyOrigin");
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-    app.MapScalarApiReference();
-}
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+    app.MapScalarApiReference();
+}
 app.MapControllers();
 
 app.Run();
