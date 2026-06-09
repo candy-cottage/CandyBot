@@ -23,7 +23,7 @@ public partial class CandyBotService
         {
             if (e.Detail == "地平线")
             {
-                md.Content = $"🥯{"糖果屋".CreateCmdInput()}🍧提供《极限竞速：地平线6》的相关查询功能哦，欢迎体验～\r\n测试中，不代表最终品质，如有疑问请联系维护者QQ：3305106902。\r\n**鸣谢**\r\n开发者：Mili's Candy Cottage\r\ngithub@milimoe、github@iHaydenzZ\r\n车辆调校数据来源：ZGC俱乐部《地平线6车辆摸索》\r\n赛道数据来源：ThickSea214561《FH6赛道名称中英文对照表》";
+                md.Content = $"🥯 {"糖果屋".CreateCmdInput()} 🍧提供《极限竞速：地平线6》的相关查询功能哦，欢迎体验～\r\n测试中，不代表最终品质，如有疑问请联系维护者QQ：3305106902。\r\n**鸣谢**\r\n开发者：Mili's Candy Cottage\r\ngithub@milimoe、github@iHaydenzZ\r\n车辆调校数据来源：ZGC俱乐部《地平线6车辆摸索》\r\n赛道数据来源：ThickSea214561《FH6赛道名称中英文对照表》";
                 reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
@@ -36,35 +36,22 @@ public partial class CandyBotService
                     return true;
                 }
 
-                string fileId = e.Detail["同步车辆表".Length..].Trim();
-                if (fileId == "" && forzaConfig.DocsID.TryGetValue("ZGC", out string? value) && value != null)
+                if (taskSchedulerExecutor.RunTaskNow(SystemServices.SystemInitializedService.TaskName_12ClockSyncCar))
                 {
-                    fileId = value;
-                }
-
-                if (fileId == "")
-                {
-                    md.Content = "请提供要同步的表格ID，例如：\n同步车辆表 <表格ID>\n如果不提供ID，将默认使用配置中的ZGC车队表格。若仍然显示该提示，请检查配置文件。";
-                    await botService.SendAsync(e, reply);
-                    return true;
-                }
-
-                ForzaSheetSyncReport report = await forzaSheetImporter.SyncAsync(fileId);
-                if (report.Success)
-                {
-                    md.Content =
-                        $"**文件：{fileId}**\r\n" +
-                        $"✅ 已同步 {report.InsertedVehicleCount} 辆车辆。\r\n" +
-                        $"原表：{report.PreviousVehicleCount} 辆；解析：{report.ParsedVehicleCount} 辆；工作表：{report.ParsedSheetNames.Count} 张。\r\n" +
-                        $"跳过工作表：{report.SkippedSheetNames.Count} 张；跳过行：{report.SkippedRows.Count} 行。" +
-                        (report.Diagnostics.Count > 0 ? "\r\n诊断：" + string.Join("\r\n", report.Diagnostics.Take(3)) : "");
+                    await botService.SendAsync(e, "任务计划已提交，请等待结果！");
                 }
                 else
                 {
-                    md.Content =
-                        $"**文件：{fileId}**\r\n" +
-                        $"❌ 同步车辆表失败：{report.ErrorMessage}\r\n" +
-                        $"旧数据已保留。当前原表记录：{report.PreviousVehicleCount} 辆；解析：{report.ParsedVehicleCount} 辆。";
+                    await botService.SendAsync(e, "任务计划提交失败，请稍后再试。");
+                }
+                return true;
+            }
+
+            if (e.Detail.StartsWith("刷新制造商缓存"))
+            {
+                if (!await CheckUser(e, user))
+                {
+                    return true;
                 }
 
                 await sql.ExecuteDataSetAsync("Select Distinct Manufacturer From Vehicles");
@@ -74,7 +61,7 @@ public partial class CandyBotService
                     forzaConfig.Update(manufacturers);
                 }
 
-                await botService.SendAsync(e, reply);
+                await botService.SendAsync(e, "刷新完成");
                 return true;
             }
 
@@ -84,18 +71,13 @@ public partial class CandyBotService
                 reply.Keyboard = new KeyboardMessage();
 
                 // 分离页码
-                string[] tokens = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                int page = 1;
-                string queryStr = detail;
-                if (tokens.Length > 0 && int.TryParse(tokens[^1], out int lastNum))
-                {
-                    page = lastNum;
-                    queryStr = string.Join(" ", tokens.Take(tokens.Length - 1)).Trim();
-                }
+                System.Text.RegularExpressions.Match match = GetPageParam().Match(detail);
+                string queryStr = match.Groups[1].Value.Trim();
+                int page = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : (match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : 1);
 
                 if (string.IsNullOrEmpty(queryStr))
                 {
-                    md.Content = "格式：查赛道 <关键字> [页码]\r\n" +
+                    md.Content = "格式：查赛道 <关键字> -p [页码]\r\n" +
                                  "示例：查赛道 白川\r\n" +
                                  "示例：查赛道 Shirakawa\r\n" +
                                  "支持按中文名、英文名、别名搜索。";
@@ -110,7 +92,7 @@ public partial class CandyBotService
                     string cards = ForzaService.RenderMapsAsCards(data);
                     md.Content = $"🛣️ 查询结果（{page} / {totalPages} 页）\r\n{cards}";
                     if (totalPages > 1)
-                        reply.Keyboard.AddPaginationRow($"查赛道 {queryStr} ", page, totalPages);
+                        reply.Keyboard.AddPaginationRow($"查赛道 {queryStr} -p ", page, totalPages);
                 }
                 else
                 {
@@ -131,19 +113,14 @@ public partial class CandyBotService
                 ];
                 reply.Keyboard = new KeyboardMessage();
 
-                // 分离页码（最后一个 token 是数字）
-                string[] tokens = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                int page = 1;
-                string queryStr = detail;
-                if (tokens.Length > 0 && int.TryParse(tokens[^1], out int lastNum))
-                {
-                    page = lastNum;
-                    queryStr = string.Join(" ", tokens.Take(tokens.Length - 1)).Trim();
-                }
+                // 分离页码
+                System.Text.RegularExpressions.Match match = GetPageParam().Match(detail);
+                string queryStr = match.Groups[1].Value.Trim();
+                int page = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : (match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : 1);
 
                 if (string.IsNullOrEmpty(queryStr))
                 {
-                    md.Content = "格式：查车 <制造商/型号> [页码]\r\n" +
+                    md.Content = "格式：查车 <制造商/型号> -p [页码]\r\n" +
                         "示例：查车 法拉利\r\n" +
                         "示例：查车 FXX\r\n" +
                         "示例：查车 法拉利FXX\r\n" +
@@ -168,7 +145,7 @@ public partial class CandyBotService
                 else md.Content = msg;
                 if (totalPages > 1)
                 {
-                    reply.Keyboard.AddPaginationRow($"查车 {queryStr} ", page, totalPages);
+                    reply.Keyboard.AddPaginationRow($"查车 {queryStr} -p ", page, totalPages);
                 }
                 reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
@@ -190,16 +167,9 @@ public partial class CandyBotService
                 }
 
                 // ----- 智能解析参数 -----
-                string[] tokens = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                int page = 1;
-                string paramStr = detail;
-
-                // 如果最后一个 token 是数字，则视为页码
-                if (tokens.Length > 0 && int.TryParse(tokens[^1], out int lastNum))
-                {
-                    page = lastNum;
-                    paramStr = string.Join(" ", tokens.Take(tokens.Length - 1));
-                }
+                System.Text.RegularExpressions.Match reMatch = GetPageParam().Match(detail);
+                string paramStr = reMatch.Groups[1].Value.Trim();
+                int page = reMatch.Groups[2].Success ? int.Parse(reMatch.Groups[2].Value) : (reMatch.Groups[3].Success ? int.Parse(reMatch.Groups[3].Value) : 1);
 
                 string? classInput = null;
                 string? matchTypeInput = null;
@@ -245,7 +215,7 @@ public partial class CandyBotService
                 reply.Keyboard = new KeyboardMessage();
                 if (totalPages > 1)
                 {
-                    reply.Keyboard.AddPaginationRow(baseCmd + " ", page, totalPages);
+                    reply.Keyboard.AddPaginationRow(baseCmd + " -p ", page, totalPages);
                 }
                 reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
 
@@ -951,8 +921,7 @@ public partial class CandyBotService
         return true;
     }
 
-    private static List<Button> ForzaNavButtons() =>
-    [
+    private static List<Button> ForzaNavButtons() => [
         Button.CreateCmdButton("🌟 地平线", "地平线", false),
         Button.CreateCmdButton("🏎 查车", "查车", false),
         Button.CreateCmdButton("🛣️ 查赛道", "查赛道", false),

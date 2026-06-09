@@ -1,8 +1,8 @@
 using CandyBot.Tests.Fakes;
 using CandyBot.Tests.Utilities;
+using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services;
-using CandyCottage.CandyBot.Services.BotServices;
 using CandyCottage.CandyBot.Services.Esports;
 using CandyCottage.CandyBot.Utilities;
 using FluentAssertions;
@@ -80,12 +80,12 @@ public class BettingScopeFilterCommandTests
             forzaConfig: null!,
             taskQueue: null!,
             taskManager: null!,
+            taskSchedulerExecutor: null!,
             sender,
             bettingService: null!,
             sqlInitService: null!,
             userService: null!,
             forzaService: null!,
-            forzaSheetImporter: null!,
             esportsSyncService,
             userAPITokenService: null!);
     }

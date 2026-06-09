@@ -5,7 +5,7 @@ using Milimoe.FunGame.Core.Model;
 
 namespace CandyCottage.CandyBot.Services.SystemServices
 {
-    public class TaskSchedulerService(ILogger<TaskSchedulerService> logger, ITaskSchedulerManager manager) : BackgroundService
+    public class TaskSchedulerService(ILogger<TaskSchedulerService> logger, ITaskSchedulerManager manager) : BackgroundService, ITaskSchedulerExecutor
     {
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -42,7 +42,7 @@ namespace CandyCottage.CandyBot.Services.SystemServices
                 }
             }
 
-            await WaitForRunningTasksAsync(TimeSpan.FromSeconds(30));
+            await WaitForRunningTasksAsync(TimeSpan.FromSeconds(5));
             logger.LogInformation("Task Scheduler Service has stopped.");
         }
 
@@ -126,6 +126,33 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             {
                 logger.LogWarning("Timeout while waiting for tasks to complete.");
             }
+        }
+
+        public bool RunTaskNow(string taskName, CancellationToken cancellationToken = default)
+        {
+            // 1. 获取任务
+            IScheduledTask? task = manager.GetAllTasks().FirstOrDefault(t => t.Name.Equals(taskName, StringComparison.OrdinalIgnoreCase));
+            if (task is null) return false;
+
+            // 2. 检查是否正在运行
+            if (IsTaskRunning(task.Name))
+            {
+                logger.LogWarning("Task {TaskName} is already running, cannot execute now.", task.Name);
+                return false;
+            }
+
+            // 3. 异步执行
+            DateTime now = DateTime.Now;
+            Task execTask = Task.Run(() => ExecuteTaskAsync(task, now, cancellationToken), cancellationToken).ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    logger.LogError(t.Exception, "Manual execution of task {TaskName} failed.", task.Name);
+                }
+            }, cancellationToken);
+            TrackRunningTask(execTask, task.Name);
+
+            return true;
         }
     }
 }

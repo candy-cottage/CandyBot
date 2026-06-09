@@ -6,7 +6,7 @@ using Milimoe.FunGame.Core.Api.Transmittal;
 
 namespace CandyCottage.CandyBot.Services
 {
-    public class ForzaService(ILogger<ForzaService> logger, SQLHelper sql)
+    public class ForzaService(ILogger<ForzaService> logger, SQLHelper sql, ForzaConfig forzaConfig)
     {
         public (bool success, string message, DataTable? data, int totalPages) GetVehicleDataTable(string whereClause, int page, int pageSize = 12)
         {
@@ -95,8 +95,8 @@ namespace CandyCottage.CandyBot.Services
         }
 
         /// <summary>
-        /// 解析“制造商别名 + 型号”组合输入：从数据库实时读取去重制造商（不用 ForzaConfig 内存缓存，
-        /// 避免新增车辆后缓存过期），把每个制造商按空格拆 token，生成自左 token 前缀与自右 token 后缀
+        /// 解析“制造商别名 + 型号”组合输入：从数据库实时读取去重制造商（如果 ForzaConfig 内存缓存为空）
+        /// 把每个制造商按空格拆 token，生成自左 token 前缀与自右 token 后缀
         /// 作为别名（如 "Aston Martin 阿斯顿·马丁" → Aston、AstonMartin、阿斯顿·马丁……）；
         /// 去空格后的输入以某别名开头且剩余非空时，得到一个 (真实制造商, 型号关键字) 候选。
         /// 多个别名命中时只保留最长别名的候选，防止 Aston 抢走 AstonMartin。
@@ -107,37 +107,52 @@ namespace CandyCottage.CandyBot.Services
             string compactKeyword = keyword.Replace(" ", "");
             if (compactKeyword == "") return [];
 
-            sql.ExecuteDataSet("SELECT DISTINCT Manufacturer FROM Vehicles");
-            if (!sql.Success || sql.DataSet.Tables.Count == 0) return [];
-
             List<(int AliasLength, string Manufacturer, string ModelKeyword)> candidates = [];
-            foreach (DataRow row in sql.DataSet.Tables[0].Rows)
+            if (forzaConfig.Manufacturers.Count == 0)
             {
-                string manufacturer = row["Manufacturer"].ToString() ?? "";
-                string[] tokens = manufacturer.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (tokens.Length == 0) continue;
+                sql.ExecuteDataSet("SELECT DISTINCT Manufacturer FROM Vehicles");
+                if (!sql.Success || sql.DataSet.Tables.Count == 0) return [];
 
-                HashSet<string> aliases = new(StringComparer.OrdinalIgnoreCase);
-                for (int i = 1; i <= tokens.Length; i++)
+                foreach (DataRow row in sql.DataSet.Tables[0].Rows)
                 {
-                    aliases.Add(string.Concat(tokens[..i]));  // 自左前缀：Aston、AstonMartin、……
-                    aliases.Add(string.Concat(tokens[^i..])); // 自右后缀：阿斯顿·马丁、Martin阿斯顿·马丁、……
+                    string manufacturer = row["Manufacturer"].ToString() ?? "";
+                    SplitManufacturers(compactKeyword, manufacturer, candidates);
                 }
-
-                foreach (string alias in aliases)
+            }
+            else
+            {
+                foreach (string manufacturer in forzaConfig.Manufacturers)
                 {
-                    // 输入必须严格长于别名：剩余部分作为型号关键字，纯厂商搜索不进组合分支
-                    if (compactKeyword.Length > alias.Length &&
-                        compactKeyword.StartsWith(alias, StringComparison.OrdinalIgnoreCase))
-                    {
-                        candidates.Add((alias.Length, manufacturer, compactKeyword[alias.Length..]));
-                    }
+                    SplitManufacturers(compactKeyword, manufacturer, candidates);
                 }
             }
 
             if (candidates.Count == 0) return [];
             int maxLength = candidates.Max(c => c.AliasLength);
             return [.. candidates.Where(c => c.AliasLength == maxLength).Select(c => (c.Manufacturer, c.ModelKeyword)).Distinct()];
+        }
+
+        private static void SplitManufacturers(string compactKeyword, string manufacturer, List<(int AliasLength, string Manufacturer, string ModelKeyword)> candidates)
+        {
+            string[] tokens = manufacturer.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0) return;
+
+            HashSet<string> aliases = new(StringComparer.OrdinalIgnoreCase);
+            for (int i = 1; i <= tokens.Length; i++)
+            {
+                aliases.Add(string.Concat(tokens[..i]));  // 自左前缀：Aston、AstonMartin、……
+                aliases.Add(string.Concat(tokens[^i..])); // 自右后缀：阿斯顿·马丁、Martin阿斯顿·马丁、……
+            }
+
+            foreach (string alias in aliases)
+            {
+                // 输入必须严格长于别名：剩余部分作为型号关键字，纯厂商搜索不进组合分支
+                if (compactKeyword.Length > alias.Length &&
+                    compactKeyword.StartsWith(alias, StringComparison.OrdinalIgnoreCase))
+                {
+                    candidates.Add((alias.Length, manufacturer, compactKeyword[alias.Length..]));
+                }
+            }
         }
 
         public (bool success, string message, DataTable? data, int totalPages) GetVehiclesByClassAndMatchTypeRaw(string? classInput, string? matchTypeInput, int page)
@@ -946,41 +961,70 @@ namespace CandyCottage.CandyBot.Services
 
         private static readonly Dictionary<string, string> RouteTypeLabel = new()
         {
-            ["circuit"] = "圈图", ["sprint"] = "冲刺图"
+            ["circuit"] = "圈图",
+            ["sprint"] = "冲刺图"
         };
         private static readonly Dictionary<string, string> RaceCategoryLabel = new()
         {
-            ["road"] = "公路", ["dirt"] = "泥地", ["cross_country"] = "越野",
-            ["street"] = "街头", ["drag"] = "直线加速", ["rally"] = "拉力",
-            ["showcase"] = "表演赛", ["mountain_road"] = "峠道"
+            ["road"] = "公路",
+            ["dirt"] = "泥地",
+            ["cross_country"] = "越野",
+            ["street"] = "街头",
+            ["drag"] = "直线加速",
+            ["rally"] = "拉力",
+            ["showcase"] = "表演赛",
+            ["mountain_road"] = "峠道"
         };
         private static readonly Dictionary<string, string> SurfaceLabel = new()
         {
-            ["asphalt"] = "柏油路", ["dirt"] = "泥地", ["gravel"] = "砂石",
-            ["sand"] = "沙地", ["mixed"] = "混合", ["snow"] = "雪地", ["cross_country"] = "越野"
+            ["asphalt"] = "柏油路",
+            ["dirt"] = "泥地",
+            ["gravel"] = "砂石",
+            ["sand"] = "沙地",
+            ["mixed"] = "混合",
+            ["snow"] = "雪地",
+            ["cross_country"] = "越野"
         };
         private static readonly Dictionary<string, string> CharacteristicLabel = new()
         {
-            ["handling"] = "操控", ["speed"] = "极速", ["balanced"] = "均衡",
-            ["offroad"] = "越野", ["drift"] = "漂移", ["technical"] = "技术"
+            ["handling"] = "操控",
+            ["speed"] = "极速",
+            ["balanced"] = "均衡",
+            ["offroad"] = "越野",
+            ["drift"] = "漂移",
+            ["technical"] = "技术"
         };
         private static readonly Dictionary<string, string> ElevationLabel = new()
         {
-            ["flat"] = "平坦", ["gentle"] = "缓坡", ["hilly"] = "丘陵", ["mountainous"] = "山地"
+            ["flat"] = "平坦",
+            ["gentle"] = "缓坡",
+            ["hilly"] = "丘陵",
+            ["mountainous"] = "山地"
         };
         private static readonly Dictionary<string, string> RoadWidthLabel = new()
         {
-            ["narrow"] = "窄", ["normal"] = "正常", ["wide"] = "宽"
+            ["narrow"] = "窄",
+            ["normal"] = "正常",
+            ["wide"] = "宽"
         };
         private static readonly Dictionary<string, string> SeasonLabel = new()
         {
-            ["spring"] = "春", ["summer"] = "夏", ["autumn"] = "秋", ["winter"] = "冬",
-            ["wet"] = "湿地", ["dry"] = "干地", ["all"] = "全部"
+            ["spring"] = "春",
+            ["summer"] = "夏",
+            ["autumn"] = "秋",
+            ["winter"] = "冬",
+            ["wet"] = "湿地",
+            ["dry"] = "干地",
+            ["all"] = "全部"
         };
         private static readonly Dictionary<string, string> WeatherLabel = new()
         {
-            ["clear"] = "晴", ["rain"] = "雨", ["fog"] = "雾", ["storm"] = "暴风雨",
-            ["snow"] = "雪", ["variable"] = "多变"
+            ["clear"] = "晴",
+            ["rain"] = "雨",
+            ["fog"] = "雾",
+            ["storm"] = "暴风雨",
+            ["snow"] = "雪",
+            ["variable"] = "多变"
         };
 
         private static string T(Dictionary<string, string> map, string key)

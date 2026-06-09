@@ -1,6 +1,5 @@
 ﻿using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
-using CandyCottage.CandyBot.Services.BotServices;
 using CandyCottage.CandyBot.Services.SystemServices;
 using CandyCottage.CandyBot.Utilities;
 using Microsoft.Extensions.Caching.Memory;
@@ -12,9 +11,9 @@ using ProjectRedbud.FunGame.SQLQueryExtension;
 namespace CandyCottage.CandyBot.Services
 {
     public partial class CandyBotService(ILogger<CandyBotService> logger, IMemoryCache memoryCache, SQLHelper sql, CandyBotFunctionConfig functionConfig, ForzaConfig forzaConfig,
-        IBackgroundTaskQueue taskQueue, ITaskSchedulerManager taskManager,
+        IBackgroundTaskQueue taskQueue, ITaskSchedulerManager taskManager, ITaskSchedulerExecutor taskSchedulerExecutor,
         IBotReplySender botService, BettingService bettingService, SQLTableInitializeService sqlInitService, UserService userService, ForzaService forzaService,
-        IForzaSheetImporter forzaSheetImporter, Esports.EsportsSyncService esportsSyncService, UserAPITokenService userAPITokenService)
+        Esports.EsportsSyncService esportsSyncService, UserAPITokenService userAPITokenService)
     {
         public async Task Handler(IBotMessage e)
         {
@@ -199,22 +198,24 @@ namespace CandyCottage.CandyBot.Services
             {
                 if (sql.GetUserById(userId) is User user)
                 {
-                    IBotMessage e = new C2CMessage()
-                    {
-                        Author = new()
-                        {
-                            Bot = false,
-                            Id = user.Username,
-                        },
-                        Detail = "",
-                        SendProactive = true
-                    };
                     if (title != "" && reply.Markdown != null)
                     {
                         reply.Markdown.Content = $"**【{title}】{(showTime ? DateTime.Now.ToString(Milimoe.FunGame.Core.Library.Constant.General.GeneralDateTimeFormatChinese) : "")}**\n\n{reply.Markdown.Content}";
                     }
-                    await botService.SendAsync(e, reply);
+                    await botService.SendActiveMessageAsync(user.Username, false, reply);
                 }
+            });
+        }
+
+        public async Task SendGroupNotice(string groupOpenId, BotReply reply, string title = "系统通知", bool showTime = true)
+        {
+            await taskQueue.QueueAsync(async (token) =>
+            {
+                if (title != "" && reply.Markdown != null)
+                {
+                    reply.Markdown.Content = $"**【{title}】{(showTime ? DateTime.Now.ToString(Milimoe.FunGame.Core.Library.Constant.General.GeneralDateTimeFormatChinese) : "")}**\n\n{reply.Markdown.Content}";
+                }
+                await botService.SendActiveMessageAsync(groupOpenId, true, reply);
             });
         }
 
@@ -233,5 +234,7 @@ namespace CandyCottage.CandyBot.Services
         private static partial System.Text.RegularExpressions.Regex GetParamValue();
         [System.Text.RegularExpressions.GeneratedRegex(@"^([A-Za-z]\d*)(.*)$")]
         private static partial System.Text.RegularExpressions.Regex MatchClassAndMatchType();
+        [System.Text.RegularExpressions.GeneratedRegex(@"^(.*?)(?:-p\s+(\d+)|--page\s+(\d+))?$")]
+        private static partial System.Text.RegularExpressions.Regex GetPageParam();
     }
 }

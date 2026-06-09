@@ -1,6 +1,7 @@
 ﻿using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Utilities;
 using Microsoft.Extensions.Caching.Memory;
@@ -53,6 +54,23 @@ namespace CandyCottage.CandyBot.Services.BotServices
         public async Task<UploadMediaResult> UploadGroupMediaAsync(string groupOpenid, int fileType, string url)
         {
             return await UploadMediaAsync($"/v2/groups/{groupOpenid}/files", fileType, url);
+        }
+
+        public async Task SendActiveMessageAsync(string openId, bool isGroup, BotReply reply, int? msgSeq = null)
+        {
+            IBotMessage msg = isGroup ? new GroupMessage()
+            {
+                SendProactive = true,
+                GroupOpenId = openId,
+            } : new C2CMessage()
+            {
+                SendProactive = true,
+                Author = new()
+                {
+                    Id = openId
+                }
+            };
+            await SendAsync(msg, reply, msgSeq);
         }
 
         public async Task<SendMessageResult?> SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)

@@ -1,10 +1,10 @@
 ﻿using System.Globalization;
 using System.Security.Cryptography;
+using CandyCottage.CandyBot.Utilities;
 using Microsoft.AspNetCore.Mvc;
 using Milimoe.FunGame.Core.Api.Transmittal;
 using Milimoe.FunGame.Core.Api.Utility;
 using Milimoe.FunGame.Core.Library.SQLScript.Common;
-using CandyCottage.CandyBot.Utilities;
 
 namespace CandyCottage.CandyBot.Controllers
 {

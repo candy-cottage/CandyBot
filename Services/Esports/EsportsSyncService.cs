@@ -1,4 +1,5 @@
 using System.Data;
+using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Utilities;
 using Milimoe.FunGame.Core.Api.Transmittal;

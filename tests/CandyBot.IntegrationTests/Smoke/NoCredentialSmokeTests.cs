@@ -1,8 +1,16 @@
 using System.Net;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 using CandyBot.IntegrationTests.Infrastructure;
 using FluentAssertions;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace CandyBot.IntegrationTests.Smoke;
@@ -14,10 +22,12 @@ namespace CandyBot.IntegrationTests.Smoke;
 /// </summary>
 public class NoCredentialSmokeTests : IClassFixture<CandyBotWebApplicationFactory>
 {
+    private readonly CandyBotWebApplicationFactory _factory;
     private readonly HttpClient _client;
 
     public NoCredentialSmokeTests(CandyBotWebApplicationFactory factory)
     {
+        _factory = factory;
         // 不自动跟随重定向：若 HttpsRedirection 意外产生 307，可被断言捕获而非被吞掉。
         // 注意：测试宿主（TestServer）没有真实监听端口，UseHttpsRedirection 无法
         // 确定 HTTPS 端口，因此它不会产生重定向——AllowAutoRedirect=false 是安全的。
@@ -30,8 +40,27 @@ public class NoCredentialSmokeTests : IClassFixture<CandyBotWebApplicationFactor
     [Fact]
     public async Task Sheet_view_without_fileId_returns_html_page()
     {
-        // SheetController.Viewer：fileId 为空时在调用任何腾讯接口前直接渲染视图。
-        HttpResponseMessage response = await _client.GetAsync("/sheet/view");
+        // 由于端点现在要求 Admin 授权，创建一个模拟认证的客户端
+        WebApplicationFactory<Program> factoryWithAuth = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddAuthentication("TestScheme")
+                    .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("TestScheme", _ => { });
+                // 覆盖默认认证方案，确保使用我们的测试方案
+                services.Configure<AuthenticationOptions>(options =>
+                {
+                    options.DefaultAuthenticateScheme = "TestScheme";
+                    options.DefaultChallengeScheme = "TestScheme";
+                });
+            });
+        });
+        HttpClient client = factoryWithAuth.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        HttpResponseMessage response = await client.GetAsync("/sheet/view");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Content.Headers.ContentType?.MediaType.Should().Be("text/html");
@@ -92,6 +121,24 @@ public class NoCredentialSmokeTests : IClassFixture<CandyBotWebApplicationFactor
         HttpResponseMessage response = await _client.GetAsync("/betting/bets");
 
         response.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>
+    /// 模拟认证处理器，用于在测试中注入 Admin 角色，绕过真实 Bearer Token 验证。
+    /// </summary>
+    private class TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    {
+        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        {
+            Claim[] claims = [
+                new(ClaimTypes.Name, "test-admin"),
+                new(ClaimTypes.Role, "Admin")
+            ];
+            ClaimsIdentity identity = new(claims, "TestScheme");
+            ClaimsPrincipal principal = new(identity);
+            AuthenticationTicket ticket = new(principal, "TestScheme");
+            return Task.FromResult(AuthenticateResult.Success(ticket));
+        }
     }
 }
 

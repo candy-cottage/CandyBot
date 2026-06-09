@@ -1,5 +1,5 @@
+using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
-using CandyCottage.CandyBot.Services.BotServices;
 
 namespace CandyBot.Tests.Fakes;
 
@@ -20,6 +20,23 @@ public sealed class RecordingBotReplySender : IBotReplySender
     /// 每条回复的文本内容。优先取纯文本 <see cref="BotReply.Text"/>；多数回复经由 string→BotReply 隐式转换写入 Markdown.Content，故回退到该字段。
     /// </summary>
     public IEnumerable<string?> TextContents => _sent.Select(s => s.Reply.Text ?? s.Reply.Markdown?.Content);
+
+    public async Task SendActiveMessageAsync(string openId, bool isGroup, BotReply reply, int? msgSeq = null)
+    {
+        IBotMessage msg = isGroup ? new GroupMessage()
+        {
+            SendProactive = true,
+            GroupOpenId = openId,
+        } : new C2CMessage()
+        {
+            SendProactive = true,
+            Author = new()
+            {
+                Id = openId
+            }
+        };
+        await SendAsync(msg, reply, msgSeq);
+    }
 
     public Task<SendMessageResult?> SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)
     {
