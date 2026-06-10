@@ -234,7 +234,20 @@ namespace CandyCottage.CandyBot.Services
         private static partial System.Text.RegularExpressions.Regex GetParamValue();
         [System.Text.RegularExpressions.GeneratedRegex(@"^([A-Za-z]\d*)(.*)$")]
         private static partial System.Text.RegularExpressions.Regex MatchClassAndMatchType();
-        [System.Text.RegularExpressions.GeneratedRegex(@"^(.*?)(?:-p\s+(\d+)|--page\s+(\d+))?$")]
+        [System.Text.RegularExpressions.GeneratedRegex(@"^(.*?)(?:(?:-p|--page)\s+(\d+))?$")]
         private static partial System.Text.RegularExpressions.Regex GetPageParam();
+
+        /// <summary>
+        /// 从指令尾部解析 “-p &lt;页码&gt;” / “--page &lt;页码&gt;” 参数，返回（关键字, 页码）。
+        /// 未带页码参数时返回第 1 页；页码无效（为 0 或超出 int 范围）时按未指定处理，
+        /// 但仍从关键字中剥离页码参数，避免把它带进搜索词。
+        /// </summary>
+        public static (string Query, int Page) SplitPageParam(string detail)
+        {
+            System.Text.RegularExpressions.Match match = GetPageParam().Match(detail);
+            string query = match.Groups[1].Value.Trim();
+            if (!match.Groups[2].Success) return (query, 1);
+            return int.TryParse(match.Groups[2].Value, out int page) && page >= 1 ? (query, page) : (query, 1);
+        }
     }
 }

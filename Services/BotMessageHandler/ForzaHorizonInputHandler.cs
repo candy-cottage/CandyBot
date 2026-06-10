@@ -36,13 +36,22 @@ public partial class CandyBotService
                     return true;
                 }
 
+                // 指令已改为统一同步配置（DocsID）中的所有表格，不再支持指定表格ID——
+                // 静默忽略参数会让管理员误以为同步了指定表格，必须显式拒绝
+                string extraArg = e.Detail["同步车辆表".Length..].Trim();
+                if (extraArg != "")
+                {
+                    await botService.SendAsync(e, "“同步车辆表”已不支持指定表格ID，将统一同步配置（DocsID）中的所有表格。\r\n如需同步新表格，请先将其加入配置，再直接发送：同步车辆表");
+                    return true;
+                }
+
                 if (taskSchedulerExecutor.RunTaskNow(SystemServices.SystemInitializedService.TaskName_12ClockSyncCar))
                 {
                     await botService.SendAsync(e, "任务计划已提交，请等待结果！");
                 }
                 else
                 {
-                    await botService.SendAsync(e, "任务计划提交失败，请稍后再试。");
+                    await botService.SendAsync(e, "任务计划提交失败，可能原因：同步任务正在运行中，请稍后再试。");
                 }
                 return true;
             }
@@ -58,10 +67,14 @@ public partial class CandyBotService
                 if (sql.Success)
                 {
                     string[] manufacturers = [.. sql.DataSet.Tables[0].AsEnumerable().Select(r => r["Manufacturer"].ToString() ?? "")];
+                    forzaConfig.Invalidate();
                     forzaConfig.Update(manufacturers);
+                    await botService.SendAsync(e, $"刷新完成，当前缓存 {manufacturers.Length} 个制造商。");
                 }
-
-                await botService.SendAsync(e, "刷新完成");
+                else
+                {
+                    await botService.SendAsync(e, "刷新失败：查询制造商列表失败，请稍后再试。");
+                }
                 return true;
             }
 
@@ -71,9 +84,7 @@ public partial class CandyBotService
                 reply.Keyboard = new KeyboardMessage();
 
                 // 分离页码
-                System.Text.RegularExpressions.Match match = GetPageParam().Match(detail);
-                string queryStr = match.Groups[1].Value.Trim();
-                int page = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : (match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : 1);
+                (string queryStr, int page) = SplitPageParam(detail);
 
                 if (string.IsNullOrEmpty(queryStr))
                 {
@@ -114,9 +125,7 @@ public partial class CandyBotService
                 reply.Keyboard = new KeyboardMessage();
 
                 // 分离页码
-                System.Text.RegularExpressions.Match match = GetPageParam().Match(detail);
-                string queryStr = match.Groups[1].Value.Trim();
-                int page = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : (match.Groups[3].Success ? int.Parse(match.Groups[3].Value) : 1);
+                (string queryStr, int page) = SplitPageParam(detail);
 
                 if (string.IsNullOrEmpty(queryStr))
                 {
@@ -167,9 +176,7 @@ public partial class CandyBotService
                 }
 
                 // ----- 智能解析参数 -----
-                System.Text.RegularExpressions.Match reMatch = GetPageParam().Match(detail);
-                string paramStr = reMatch.Groups[1].Value.Trim();
-                int page = reMatch.Groups[2].Success ? int.Parse(reMatch.Groups[2].Value) : (reMatch.Groups[3].Success ? int.Parse(reMatch.Groups[3].Value) : 1);
+                (string paramStr, int page) = SplitPageParam(detail);
 
                 string? classInput = null;
                 string? matchTypeInput = null;
