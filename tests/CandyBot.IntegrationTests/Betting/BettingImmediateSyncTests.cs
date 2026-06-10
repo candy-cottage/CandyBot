@@ -25,23 +25,6 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
         public List<BotReply> Sent { get; } = [];
         public IEnumerable<string?> TextContents => Sent.Select(reply => reply.Text ?? reply.Markdown?.Content);
 
-        public async Task SendActiveMessageAsync(string openId, bool isGroup, BotReply reply, int? msgSeq = null)
-        {
-            IBotMessage msg = isGroup ? new GroupMessage()
-            {
-                SendProactive = true,
-                GroupOpenId = openId,
-            } : new C2CMessage()
-            {
-                SendProactive = true,
-                Author = new()
-                {
-                    Id = openId
-                }
-            };
-            await SendAsync(msg, reply, msgSeq);
-        }
-
         public Task<SendMessageResult?> SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)
         {
             Sent.Add(reply);

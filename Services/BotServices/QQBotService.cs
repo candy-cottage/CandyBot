@@ -56,23 +56,6 @@ namespace CandyCottage.CandyBot.Services.BotServices
             return await UploadMediaAsync($"/v2/groups/{groupOpenid}/files", fileType, url);
         }
 
-        public async Task SendActiveMessageAsync(string openId, bool isGroup, BotReply reply, int? msgSeq = null)
-        {
-            IBotMessage msg = isGroup ? new GroupMessage()
-            {
-                SendProactive = true,
-                GroupOpenId = openId,
-            } : new C2CMessage()
-            {
-                SendProactive = true,
-                Author = new()
-                {
-                    Id = openId
-                }
-            };
-            await SendAsync(msg, reply, msgSeq);
-        }
-
         public async Task<SendMessageResult?> SendAsync(IBotMessage msg, BotReply reply, int? msgSeq = null)
         {
             if (msg is ConsoleInputMessage)
