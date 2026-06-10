@@ -5,7 +5,8 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace CandyCottage.CandyBot.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    // 角色名必须与 ApiTokensBearerHandler 签发的小写角色（admin/op）一致：角色声明值比较是大小写敏感的
+    [Authorize(Roles = "admin")]
     [ApiController]
     [Route("[controller]")]
     public class SheetController(ILogger<SheetController> logger, SheetService service) : Controller

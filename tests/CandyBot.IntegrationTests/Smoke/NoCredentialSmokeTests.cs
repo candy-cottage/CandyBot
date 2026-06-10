@@ -38,9 +38,18 @@ public class NoCredentialSmokeTests : IClassFixture<CandyBotWebApplicationFactor
     }
 
     [Fact]
+    public async Task Sheet_view_without_token_is_challenged()
+    {
+        // SheetController 带 [Authorize(Roles = "admin")]，无凭据应被鉴权管线拦截（401/403）。
+        HttpResponseMessage response = await _client.GetAsync("/sheet/view");
+
+        response.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
     public async Task Sheet_view_without_fileId_returns_html_page()
     {
-        // 由于端点现在要求 Admin 授权，创建一个模拟认证的客户端
+        // 端点要求 admin 角色，创建一个模拟认证的客户端
         WebApplicationFactory<Program> factoryWithAuth = _factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureTestServices(services =>
@@ -124,7 +133,8 @@ public class NoCredentialSmokeTests : IClassFixture<CandyBotWebApplicationFactor
     }
 
     /// <summary>
-    /// 模拟认证处理器，用于在测试中注入 Admin 角色，绕过真实 Bearer Token 验证。
+    /// 模拟认证处理器，用于在测试中注入 admin 角色，绕过真实 Bearer Token 验证。
+    /// 角色值必须使用生产签发的小写形式（见 ApiTokensBearerHandler），否则测试通过但真实令牌被拒。
     /// </summary>
     private class TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
     {
@@ -132,7 +142,7 @@ public class NoCredentialSmokeTests : IClassFixture<CandyBotWebApplicationFactor
         {
             Claim[] claims = [
                 new(ClaimTypes.Name, "test-admin"),
-                new(ClaimTypes.Role, "Admin")
+                new(ClaimTypes.Role, "admin")
             ];
             ClaimsIdentity identity = new(claims, "TestScheme");
             ClaimsPrincipal principal = new(identity);
