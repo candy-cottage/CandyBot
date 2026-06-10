@@ -108,20 +108,25 @@ namespace CandyCottage.CandyBot.Services
             if (compactKeyword == "") return [];
 
             List<(int AliasLength, string Manufacturer, string ModelKeyword)> candidates = [];
-            if (forzaConfig.Manufacturers.Count == 0)
+            IReadOnlyList<string> cached = forzaConfig.Manufacturers;
+            if (cached.Count == 0)
             {
                 sql.ExecuteDataSet("SELECT DISTINCT Manufacturer FROM Vehicles");
                 if (!sql.Success || sql.DataSet.Tables.Count == 0) return [];
 
+                List<string> loaded = [];
                 foreach (DataRow row in sql.DataSet.Tables[0].Rows)
                 {
                     string manufacturer = row["Manufacturer"].ToString() ?? "";
+                    loaded.Add(manufacturer);
                     SplitManufacturers(compactKeyword, manufacturer, candidates);
                 }
+                // 回填缓存：否则重启后（或缓存失效后）每次组合搜索都会重复这条 DISTINCT 查询
+                forzaConfig.Update(loaded);
             }
             else
             {
-                foreach (string manufacturer in forzaConfig.Manufacturers)
+                foreach (string manufacturer in cached)
                 {
                     SplitManufacturers(compactKeyword, manufacturer, candidates);
                 }
@@ -302,6 +307,8 @@ namespace CandyCottage.CandyBot.Services
                 }
 
                 sql.Commit();
+                // 制造商可能被改名，失效缓存
+                forzaConfig.Invalidate();
                 return true;
             }
             catch (Exception ex)
@@ -404,6 +411,8 @@ namespace CandyCottage.CandyBot.Services
                     error = "新增车辆失败，请稍后重试。";
                     return false;
                 }
+                // 可能引入新制造商，失效缓存（清空总是安全的，最坏只是下次搜索多一次 DISTINCT 查询）
+                forzaConfig.Invalidate();
                 return true;
             }
             catch (Exception ex)
@@ -434,6 +443,8 @@ namespace CandyCottage.CandyBot.Services
 
                 int deleted = sql.AffectedRows;
                 sql.Commit();
+                // 某制造商的最后一辆车可能被删除，失效缓存
+                forzaConfig.Invalidate();
                 return (true, $"成功删除 {deleted} 辆车", deleted);
             }
             catch (Exception ex)
