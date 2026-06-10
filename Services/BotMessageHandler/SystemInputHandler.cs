@@ -294,7 +294,8 @@ public partial class CandyBotService
                 bool triggered = taskSchedulerExecutor.RunTaskNow(task.Name);
                 if (triggered)
                 {
-                    md.Content = $"✅ 已触发任务计划“{taskName}”立即执行，请稍后查看执行结果。";
+                    // 手动执行会写入上次执行时间，定时任务（按每日时刻调度）当天的自动执行因此被跳过
+                    md.Content = $"✅ 已触发任务计划“{taskName}”立即执行，请稍后查看执行结果。\r\n> 注意：手动执行会计入上次执行时间，该任务当天的定时执行将被跳过。";
                 }
                 else
                 {

@@ -22,12 +22,8 @@ namespace CandyCottage.CandyBot.Services.SystemServices
 
                         foreach (IScheduledTask task in tasksToRun)
                         {
-                            // 防止同一任务并发执行（任务内部可能耗时超过1秒）
-                            if (IsTaskRunning(task.Name)) continue;
-
-                            // 为每个任务启动独立的后台执行
-                            Task execTask = Task.Run(() => ExecuteTaskAsync(task, now, stoppingToken), stoppingToken);
-                            TrackRunningTask(execTask, task.Name);
+                            // 防止同一任务并发执行（任务内部可能耗时超过1秒，或与手动触发竞争）
+                            TryStartTask(task, now, stoppingToken);
                         }
                     }
                 }
@@ -97,18 +93,27 @@ namespace CandyCottage.CandyBot.Services.SystemServices
 
         private readonly ConcurrentDictionary<string, Task> _runningTaskMap = new();
 
-        private bool IsTaskRunning(string taskName)
+        /// <summary>
+        /// 原子地把任务标记为运行中并启动后台执行；任务已在运行时返回 false。
+        /// 占位（TryAdd）必须发生在启动之前：定时循环与手动触发（或两次手动触发）可能并发到达，
+        /// 先检查后登记会让双方都通过“未在运行”检查，导致同一任务重复执行。
+        /// </summary>
+        private bool TryStartTask(IScheduledTask task, DateTime scheduledStartTime, CancellationToken cancellationToken)
         {
-            return _runningTaskMap.ContainsKey(taskName);
-        }
+            TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!_runningTaskMap.TryAdd(task.Name, completion.Task)) return false;
 
-        private void TrackRunningTask(Task task, string taskName)
-        {
-            _runningTaskMap[taskName] = task;
-            task.ContinueWith(_ =>
-            {
-                _runningTaskMap.TryRemove(taskName, out Task? _);
-            }, TaskContinuationOptions.ExecuteSynchronously);
+            Task.Run(() => ExecuteTaskAsync(task, scheduledStartTime, cancellationToken), cancellationToken)
+                .ContinueWith(t =>
+                {
+                    _runningTaskMap.TryRemove(task.Name, out Task? _);
+                    completion.SetResult();
+                    if (t.IsFaulted)
+                    {
+                        logger.LogError(t.Exception, "Task {TaskName} terminated unexpectedly.", task.Name);
+                    }
+                }, TaskContinuationOptions.ExecuteSynchronously);
+            return true;
         }
 
         private async Task WaitForRunningTasksAsync(TimeSpan timeout)
@@ -130,28 +135,14 @@ namespace CandyCottage.CandyBot.Services.SystemServices
 
         public bool RunTaskNow(string taskName, CancellationToken cancellationToken = default)
         {
-            // 1. 获取任务
             IScheduledTask? task = manager.GetAllTasks().FirstOrDefault(t => t.Name.Equals(taskName, StringComparison.OrdinalIgnoreCase));
             if (task is null) return false;
 
-            // 2. 检查是否正在运行
-            if (IsTaskRunning(task.Name))
+            if (!TryStartTask(task, DateTime.Now, cancellationToken))
             {
                 logger.LogWarning("Task {TaskName} is already running, cannot execute now.", task.Name);
                 return false;
             }
-
-            // 3. 异步执行
-            DateTime now = DateTime.Now;
-            Task execTask = Task.Run(() => ExecuteTaskAsync(task, now, cancellationToken), cancellationToken).ContinueWith(t =>
-            {
-                if (t.IsFaulted)
-                {
-                    logger.LogError(t.Exception, "Manual execution of task {TaskName} failed.", task.Name);
-                }
-            }, cancellationToken);
-            TrackRunningTask(execTask, task.Name);
-
             return true;
         }
     }
