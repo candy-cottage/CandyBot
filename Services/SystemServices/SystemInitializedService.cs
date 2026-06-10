@@ -1,7 +1,6 @@
 ﻿using System.Data;
 using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
-using CandyCottage.CandyBot.Services.BotServices;
 using CandyCottage.CandyBot.Utilities;
 using Milimoe.FunGame.Core.Api.Transmittal;
 using Milimoe.FunGame.Core.Api.Utility;
@@ -11,18 +10,21 @@ namespace CandyCottage.CandyBot.Services.SystemServices
 {
     public class SystemInitializedService(IServiceProvider serviceProvider, ITaskSchedulerManager taskManager, ForzaConfig forzaConfig) : IHostedService
     {
+        public const string TaskName_0ClockSyncCar = "0点同步车辆";
+        public const string TaskName_12ClockSyncCar = "12点同步车辆";
+
         public async Task StartAsync(CancellationToken cancellationToken)
         {
             using IServiceScope scope = serviceProvider.CreateScope();
             using SQLHelper sql = scope.ServiceProvider.GetRequiredService<SQLHelper>();
             await sql.ExecuteAsync(ServerLoginLogs.Insert_ServerLoginLog(sql, "CandyBot", ""));
 
-            taskManager.AddScheduledTask(new("0点同步车辆", new TimeSpan(0, 0, 0), RunAsync(SyncForzaWithDocs)), false);
-            taskManager.AddScheduledTask(new("12点同步车辆", new TimeSpan(12, 0, 0), RunAsync(SyncForzaWithDocs)), false);
+            taskManager.AddScheduledTask(new(TaskName_0ClockSyncCar, new TimeSpan(0, 0, 0), RunAsync(SyncForzaWithDocs)), false);
+            taskManager.AddScheduledTask(new(TaskName_12ClockSyncCar, new TimeSpan(12, 0, 0), RunAsync(SyncForzaWithDocs)), false);
         }
 
         /// <summary>
-        /// FunGame 任务计划只接收 <see cref="Action"/>；这里同步等待异步任务，使调度器能正确记录耗时、阻止重入并捕获异常。
+        /// FunGame 任务计划只接收 <see cref="System.Action"/>；这里同步等待异步任务，使调度器能正确记录耗时、阻止重入并捕获异常。
         /// </summary>
         private static System.Action RunAsync(Func<Task> action)
         {
@@ -69,14 +71,7 @@ namespace CandyCottage.CandyBot.Services.SystemServices
                 }
                 if (serverAdmin != "")
                 {
-                    await botReplySender.SendAsync(new C2CMessage()
-                    {
-                        SendProactive = true,
-                        Author = new()
-                        {
-                            Id = serverAdmin
-                        }
-                    }, reply);
+                    await botReplySender.SendActiveMessageAsync(serverAdmin, false, reply);
                 }
             }
 

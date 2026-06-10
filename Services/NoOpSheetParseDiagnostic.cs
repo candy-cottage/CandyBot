@@ -1,3 +1,5 @@
+using CandyCottage.CandyBot.Interfaces;
+
 namespace CandyCottage.CandyBot.Services;
 
 public sealed class NoOpSheetParseDiagnostic : ISheetParseDiagnostic

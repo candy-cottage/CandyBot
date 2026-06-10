@@ -1,5 +1,6 @@
 using System.Data;
 using CandyBot.IntegrationTests.Infrastructure;
+using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services;
 using CandyCottage.CandyBot.Services.Esports;

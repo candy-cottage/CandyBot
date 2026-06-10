@@ -37,6 +37,7 @@ namespace CandyBot.IntegrationTests.Forza;
 public class ForzaServiceTests(MySqlFixture fixture)
 {
     private readonly MySqlFixture _fixture = fixture;
+    private readonly ForzaConfig _forzaConfig = new();
 
     // ---- 种子辅助 ----
 
@@ -47,13 +48,13 @@ public class ForzaServiceTests(MySqlFixture fixture)
         string cls = "S1",
         string matchType = "Road",
         string drivetrain = "AWD") => new()
-    {
-        Manufacturer = manufacturer,
-        Model = model,
-        Class = cls,
-        MatchType = matchType,
-        Drivetrain = drivetrain,
-    };
+        {
+            Manufacturer = manufacturer,
+            Model = model,
+            Class = cls,
+            MatchType = matchType,
+            Drivetrain = drivetrain,
+        };
 
     /// <summary>
     /// 插入一辆车并返回其自增 Id。使用专属 helper 避免与测试 helper 的参数/事务状态纠缠。
@@ -61,7 +62,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
     private int SeedVehicle(VehicleRequest req)
     {
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
         svc.AddVehicle(req, out string err).Should().BeTrue(err);
         return (int)sql.LastInsertId;
     }
@@ -75,7 +76,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         VehicleRequest req = MinimalVehicle();
         req.Manufacturer = null;
@@ -91,7 +92,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         VehicleRequest req = MinimalVehicle();
         req.Model = null;
@@ -107,7 +108,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         VehicleRequest req = MinimalVehicle();
         req.Class = null;
@@ -123,7 +124,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         VehicleRequest req = MinimalVehicle();
         req.MatchType = null;
@@ -139,7 +140,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         VehicleRequest req = MinimalVehicle();
         req.Drivetrain = null;
@@ -155,7 +156,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         VehicleRequest req = MinimalVehicle("Honda", "Civic", "A", "Road", "FWD");
         req.Year = "2022";
@@ -168,7 +169,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
 
         // 用 GetVehicleInfoRaw 验证车辆可查询到
         using MySQLHelper probe = _fixture.CreateHelper();
-        ForzaService probeSvc = new(NullLogger<ForzaService>.Instance, probe);
+        ForzaService probeSvc = new(NullLogger<ForzaService>.Instance, probe, _forzaConfig);
         var (success, _, data, _) = probeSvc.GetVehicleInfoRaw("Civic", 1);
         success.Should().BeTrue();
         data.Should().NotBeNull();
@@ -181,7 +182,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         sql.NewTransaction();
         bool ok = svc.InsertVehicle(MinimalVehicle("RollbackMaker", "RollbackModel", "A", "公路", "四驱"), out string error);
@@ -204,7 +205,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         int id = SeedVehicle(MinimalVehicle("Toyota", "Supra", "S1", "Road", "RWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
         VehicleRequest upd = new() { Id = id, Remarks = "极好操控" };
         bool ok = svc.UpdateVehicle(upd, out string error);
 
@@ -212,7 +213,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
 
         // 查询验证 Remarks 已更新
         using MySQLHelper probe = _fixture.CreateHelper();
-        ForzaService probeSvc = new(NullLogger<ForzaService>.Instance, probe);
+        ForzaService probeSvc = new(NullLogger<ForzaService>.Instance, probe, _forzaConfig);
         var (success, _, data, _) = probeSvc.GetVehicleById(id);
         success.Should().BeTrue();
         data!.Rows[0]["Remarks"].ToString().Should().Be("极好操控");
@@ -229,7 +230,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         int id = SeedVehicle(MinimalVehicle("BMW", "M3", "S1", "Road", "RWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
         var (success, _, deletedCount) = svc.DeleteVehiclesByIds([id]);
 
         success.Should().BeTrue();
@@ -237,7 +238,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
 
         // 确认该行已不存在
         using MySQLHelper probe = _fixture.CreateHelper();
-        ForzaService probeSvc = new(NullLogger<ForzaService>.Instance, probe);
+        ForzaService probeSvc = new(NullLogger<ForzaService>.Instance, probe, _forzaConfig);
         var (s2, _, data, _) = probeSvc.GetVehicleById(id);
         // success=true 但 data 为空（查询本身成功，但无行）
         (s2 == false || data == null || data.Rows.Count == 0).Should().BeTrue("已删除的车辆不应再被查到");
@@ -248,7 +249,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, message, _) = svc.DeleteVehiclesByIds([]);
 
@@ -268,7 +269,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Ferrari", "488", "S2", "Road", "RWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, _, data, _) = svc.GetVehicleInfoRaw("Porsche", 1);
 
@@ -285,7 +286,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Subaru", "WRX", "A", "Rally", "AWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, _, data, totalPages) = svc.GetVehicleInfoRaw("NotExistCar", 1);
 
@@ -307,7 +308,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Porsche", "911 GT3", "S2", "Road", "RWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, _, data, _) = svc.GetVehicleInfoRaw("法拉利FXX", 1);
 
@@ -325,7 +326,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Porsche", "911 GT3", "S2", "Road", "RWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, _, data, _) = svc.GetVehicleInfoRaw("法拉利 FXX", 1);
 
@@ -343,7 +344,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Porsche", "911 GT3", "S2", "Road", "RWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         // “法拉利”与“911”分别存在于两辆不同的车，但组合名“法拉利911”不存在——不应跨行拼接误命中
         var (success, _, data, totalPages) = svc.GetVehicleInfoRaw("法拉利911", 1);
@@ -358,7 +359,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Ferrari 法拉利", "FXX", "S2", "Road", "AWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         // 模拟聊天指令 ParseManufacturerModel 解析失败后的真实回退：manufacturer == model == 原始输入，useOr=true
         var (success, msg) = svc.GetVehicleInfo("法拉利FXX", "法拉利FXX", true, 1, out int totalPages);
@@ -381,7 +382,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Porsche", "911 GT3", "S2", "Road", "RWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, _, data, _) = svc.GetVehicleInfoRaw("FerrariFXX", 1);
 
@@ -399,7 +400,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Aston Martin 阿斯顿·马丁", "Valkyrie", "S2", "Road", "AWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, _, data, _) = svc.GetVehicleInfoRaw("AstonMartinValkyrie", 1);
 
@@ -417,7 +418,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Porsche", "911 GT3", "S2", "Road", "RWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, _, data, totalPages) = svc.GetVehicleInfoRaw("Ferrari911", 1);
 
@@ -439,7 +440,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Wildcard", "A%A", "A", "Road", "FWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         // 搜索 "A%A"：若 % 未转义则会匹配 "AAA"、"AXA"、"A%A" 三行；
         // 转义正确则只匹配字面量 "A%A" 一行。
@@ -461,7 +462,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Underscore", "ACA", "B", "Road", "FWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         // 搜索 "A_A"：若 _ 未转义则会匹配 "ABA"、"ACA"、"A_A" 三行；
         // 转义正确则只匹配字面量 "A_A" 一行。
@@ -502,7 +503,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Maker", "Mv4", "A", "Cross", "AWD")); // 两者均不满足
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         // OR 路径：搜 Class=S2 OR MatchType=Road，应有 3 辆（Mv1、Mv2、Mv3）
         var (success, _) = svc.GetVehiclesByClassOrMatchType("S2", "Road", 1, out _);
@@ -526,7 +527,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Maker", "Mv4", "A", "Cross", "AWD")); // 两者均不满足
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, _, data, _) = svc.GetVehiclesByClassAndMatchTypeRaw("S2", "Road", 1);
 
@@ -554,7 +555,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
 
         // AND 计数（通过 service Raw 方法）
         using MySQLHelper sqlAnd = _fixture.CreateHelper();
-        ForzaService svcAnd = new(NullLogger<ForzaService>.Instance, sqlAnd);
+        ForzaService svcAnd = new(NullLogger<ForzaService>.Instance, sqlAnd, _forzaConfig);
         var (_, _, andData, _) = svcAnd.GetVehiclesByClassAndMatchTypeRaw("S2", "Road", 1);
 
         andData.Should().NotBeNull();
@@ -575,7 +576,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         int id2 = SeedVehicle(MinimalVehicle("Beta", "Y2", "A", "Rally", "FWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, _, data, _) = svc.GetVehicleById(id1);
 
@@ -596,7 +597,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("OnlyOne", "Z9", "S2", "Road", "RWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
         var (success, _, data, totalPages) = svc.GetVehicleById(999999);
 
@@ -612,7 +613,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         int id = SeedVehicle(MinimalVehicle("Honda", "NSX", "S2", "Road", "AWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
         ForzaController controller = new(svc);
 
         IActionResult result = controller.GetVehicleById(id);
@@ -626,7 +627,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         await _fixture.ResetDataAsync();
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
         ForzaController controller = new(svc);
 
         IActionResult result = controller.GetVehicleById(999999);

@@ -3,7 +3,6 @@ using CandyCottage.CandyBot.Services.SystemServices;
 using CandyCottage.CandyBot.Utilities;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
-using Milimoe.FunGame.Core.Api.Transmittal;
 using Milimoe.FunGame.Core.Api.Utility;
 using Milimoe.FunGame.Core.Entity;
 using ProjectRedbud.FunGame.SQLQueryExtension;

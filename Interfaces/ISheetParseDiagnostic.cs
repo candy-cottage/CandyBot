@@ -1,4 +1,4 @@
-namespace CandyCottage.CandyBot.Services;
+namespace CandyCottage.CandyBot.Interfaces;
 
 public interface ISheetParseDiagnostic
 {

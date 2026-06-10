@@ -15,6 +15,7 @@ namespace CandyBot.IntegrationTests.Forza;
 public class ForzaSheetImporterTests(MySqlFixture fixture)
 {
     private readonly MySqlFixture _fixture = fixture;
+    private readonly ForzaConfig _forzaConfig = new();
 
     private static Dictionary<string, List<List<string>>> LoadFixture()
     {
@@ -30,7 +31,7 @@ public class ForzaSheetImporterTests(MySqlFixture fixture)
         Dictionary<string, List<List<string>>> sheets = LoadFixture();
 
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService forzaService = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService forzaService = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
         ForzaSheetImporter importer = new(
             NullLogger<ForzaSheetImporter>.Instance,
             sheetService: null!,
@@ -55,7 +56,7 @@ public class ForzaSheetImporterTests(MySqlFixture fixture)
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService forzaService = new(NullLogger<ForzaService>.Instance, sql);
+        ForzaService forzaService = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
         forzaService.AddVehicle(new VehicleRequest
         {
             Manufacturer = "Seed",

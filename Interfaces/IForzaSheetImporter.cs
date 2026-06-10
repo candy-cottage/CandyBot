@@ -1,6 +1,6 @@
 using CandyCottage.CandyBot.Models;
 
-namespace CandyCottage.CandyBot.Services;
+namespace CandyCottage.CandyBot.Interfaces;
 
 public interface IForzaSheetImporter
 {

@@ -1,5 +1,5 @@
+using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
-using CandyCottage.CandyBot.Services.BotServices;
 
 namespace CandyBot.Tests.Fakes;
 

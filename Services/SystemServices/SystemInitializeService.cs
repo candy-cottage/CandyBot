@@ -35,6 +35,13 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             General.GameplayEquilibriumConstant.InGameCurrency = "金币";
             General.GameplayEquilibriumConstant.InGameMaterial = "糖果券";
             General.GameplayEquilibriumConstant.InGameTime = "虚秒";
+            General.GameplayEquilibriumConstant.PromotionSUpperLimit = 998;
+            General.GameplayEquilibriumConstant.PromotionAPlusUpperLimit = 900;
+            General.GameplayEquilibriumConstant.PromotionAUpperLimit = 800;
+            General.GameplayEquilibriumConstant.PromotionBUpperLimit = 700;
+            General.GameplayEquilibriumConstant.PromotionCUpperLimit = 600;
+            General.GameplayEquilibriumConstant.PromotionDUpperLimit = 500;
+            General.GameplayEquilibriumConstant.PromotionEUpperLimit = 300;
             logger.LogInformation("初始化完毕！");
             return Task.CompletedTask;
         }

@@ -1,8 +1,8 @@
 using System.Data;
 using CandyBot.IntegrationTests.Infrastructure;
+using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services;
-using CandyCottage.CandyBot.Services.BotServices;
 using CandyCottage.CandyBot.Services.Esports;
 using CandyCottage.CandyBot.Utilities;
 using FluentAssertions;
@@ -82,12 +82,12 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
             forzaConfig: null!,
             taskQueue: null!,
             taskManager: null!,
+            taskSchedulerExecutor: null!,
             sender,
             new BettingService(sql, cfg),
             sqlInitService: null!,
             userService: null!,
             forzaService: null!,
-            forzaSheetImporter: null!,
             esportsSyncService: new EsportsSyncService(
                 NullLogger<EsportsSyncService>.Instance,
                 sql,

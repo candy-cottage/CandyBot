@@ -1,7 +1,7 @@
 using CandyBot.Tests.Fakes;
+using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services;
-using CandyCottage.CandyBot.Services.BotServices;
 using CandyCottage.CandyBot.Utilities;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Memory;
@@ -29,7 +29,7 @@ public class CandyBotServiceTests
         IMemoryCache? memoryCache = null,
         SQLHelper sql = null!,
         BettingService bettingService = null!,
-        IForzaSheetImporter forzaSheetImporter = null!) =>
+        ITaskSchedulerExecutor taskSchedulerExecutor = null!) =>
         new(
             NullLogger<CandyBotService>.Instance,
             memoryCache!,
@@ -38,12 +38,12 @@ public class CandyBotServiceTests
             forzaConfig!,
             taskQueue: null!,
             taskManager: null!,
+            taskSchedulerExecutor,
             botService,
             bettingService,
             sqlInitService: null!,
             userService: null!,
             forzaService: null!,
-            forzaSheetImporter,
             esportsSyncService: null!,
             userAPITokenService: null!);
 
@@ -288,36 +288,51 @@ public class CandyBotServiceTests
         content.Should().NotContain("赛事列表");
     }
 
-    // ---- Handler: 同步车辆表 (Forza sheet sync) -------------------------
+    // ---- Handler: 同步车辆表（提交任务计划） ----------------------------
 
     [Fact]
-    public async Task HandleForzaHorizonInput_同步车辆表_管理员触发导入并收到摘要()
+    public async Task HandleForzaHorizonInput_同步车辆表_管理员提交同步任务计划()
     {
         RecordingBotReplySender sender = new();
-        IForzaSheetImporter importer = Substitute.For<IForzaSheetImporter>();
-        importer.SyncAsync(DefaultVehicleSheetFileId, Arg.Any<CancellationToken>())
-            .Returns(new ForzaSheetSyncReport(
-                Success: true,
-                PreviousVehicleCount: 128,
-                ParsedVehicleCount: 157,
-                InsertedVehicleCount: 157,
-                ParsedSheetNames: ["B-600公路", "C-500公路"],
-                SkippedSheetNames: ["季节赛推荐调校（每周更新）"],
-                SkippedRows: [],
-                Diagnostics: [],
-                ErrorMessage: null));
-
-        SQLHelper sqlSub = Substitute.For<SQLHelper>();
-        sqlSub.Parameters.Returns(new Dictionary<string, object>());
-        sqlSub.Execute(Arg.Any<string>()).Returns(0);
-        sqlSub.Result.Returns(Milimoe.FunGame.Core.Library.Constant.SQLResult.NotFound);
-        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(), sql: sqlSub, forzaSheetImporter: importer);
+        ITaskSchedulerExecutor executor = Substitute.For<ITaskSchedulerExecutor>();
+        executor.RunTaskNow(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(true);
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(), taskSchedulerExecutor: executor);
         C2CMessage e = TestData.CreateMessage("同步车辆表");
 
         bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
 
         handled.Should().BeTrue();
-        await importer.Received(1).SyncAsync(DefaultVehicleSheetFileId, Arg.Any<CancellationToken>());
-        sender.TextContents.Single().Should().Contain("已同步 157 辆");
+        executor.Received(1).RunTaskNow(CandyCottage.CandyBot.Services.SystemServices.SystemInitializedService.TaskName_12ClockSyncCar, Arg.Any<CancellationToken>());
+        sender.TextContents.Single().Should().Contain("任务计划已提交");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_同步车辆表_任务正在运行_回复提交失败()
+    {
+        RecordingBotReplySender sender = new();
+        ITaskSchedulerExecutor executor = Substitute.For<ITaskSchedulerExecutor>();
+        executor.RunTaskNow(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(false);
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(), taskSchedulerExecutor: executor);
+        C2CMessage e = TestData.CreateMessage("同步车辆表");
+
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Single().Should().Contain("提交失败");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_同步车辆表带表格ID_拒绝并提示不再支持()
+    {
+        RecordingBotReplySender sender = new();
+        ITaskSchedulerExecutor executor = Substitute.For<ITaskSchedulerExecutor>();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(), taskSchedulerExecutor: executor);
+        C2CMessage e = TestData.CreateMessage("同步车辆表 ABC123");
+
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        executor.DidNotReceive().RunTaskNow(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        sender.TextContents.Single().Should().Contain("不支持指定表格ID");
     }
 }

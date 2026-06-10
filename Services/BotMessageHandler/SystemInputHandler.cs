@@ -150,7 +150,7 @@ public partial class CandyBotService
                     sb.AppendLine($"- 下次执行：{nextRun}");
                     sb.AppendLine($"- 上次执行：{lastRun}");
                     sb.AppendLine($"操作：{(isPaused ? "继续运行".CreateCmdInput($"继续任务计划 {task.Name}") : "暂停运行".CreateCmdInput($"暂停任务计划 {task.Name}"))}" +
-                        $" | {"查看详情".CreateCmdInput($"查询任务计划 {task.Name}")}");
+                        $" | {"查看详情".CreateCmdInput($"查询任务计划 {task.Name}")} | {"立即执行".CreateCmdInput($"立即执行任务计划 {task.Name}")}");
                 }
                 sb.AppendLine("> 使用 `查询任务计划 <任务名>` 查看详细信息。");
 
@@ -219,6 +219,10 @@ public partial class CandyBotService
                 }
 
                 md.Content = sb.ToString();
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2,
+                    isPaused ? Button.CreateCmdButton("继续任务", $"继续任务计划 {task.Name}", false) : Button.CreateCmdButton("暂停任务", $"暂停任务计划 {task.Name}", false),
+                    Button.CreateCmdButton("立即执行", $"立即执行任务计划 {task.Name}", false)
+                );
                 await botService.SendAsync(e, reply);
                 return true;
             }
@@ -237,31 +241,65 @@ public partial class CandyBotService
                 {
                     if (!isPaused)
                     {
-                        md.Content = "该任务未处于暂停状态。";
+                        md.Content = $"任务计划“{name}”未处于暂停状态。";
                     }
                     else if (taskManager.ResumeTask(name))
                     {
-                        md.Content = "恢复该任务计划成功。";
+                        md.Content = $"恢复任务计划“{name}”成功。";
                     }
                     else
                     {
-                        md.Content = "无法恢复该任务。";
+                        md.Content = $"无法恢复任务计划“{name}”。";
                     }
                 }
                 else
                 {
                     if (isPaused)
                     {
-                        md.Content = "该任务已处于暂停状态。";
+                        md.Content = $"任务计划“{name}”已处于暂停状态。";
                     }
                     else if (taskManager.PauseTask(name))
                     {
-                        md.Content = "暂停该任务计划成功。";
+                        md.Content = $"暂停任务计划“{name}”成功。";
                     }
                     else
                     {
-                        md.Content = "无法暂停该任务。";
+                        md.Content = $"无法暂停任务计划“{name}”。";
                     }
+                }
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            if (e.Detail.StartsWith("立即执行任务计划"))
+            {
+                if (!await CheckUser(e, user)) return true;
+
+                string taskName = e.Detail.Replace("立即执行任务计划", "").Trim();
+                if (string.IsNullOrEmpty(taskName))
+                {
+                    await botService.SendAsync(e, "请指定要执行的任务名称。");
+                    return true;
+                }
+
+                // 检查任务是否存在
+                IScheduledTask? task = taskManager.GetAllTasks().FirstOrDefault(t => t.Name.Equals(taskName, StringComparison.OrdinalIgnoreCase));
+                if (task is null)
+                {
+                    await botService.SendAsync(e, $"未找到名为“{taskName}”的任务计划。");
+                    return true;
+                }
+
+                // 触发立即执行
+                bool triggered = taskSchedulerExecutor.RunTaskNow(task.Name);
+                if (triggered)
+                {
+                    // 手动执行会写入上次执行时间，定时任务（按每日时刻调度）当天的自动执行因此被跳过
+                    md.Content = $"✅ 已触发任务计划“{taskName}”立即执行，请稍后查看执行结果。\r\n> 注意：手动执行会计入上次执行时间，该任务当天的定时执行将被跳过。";
+                }
+                else
+                {
+                    md.Content = $"❌ 无法立即执行任务计划“{taskName}”，可能原因：任务正在运行中。";
                 }
                 await botService.SendAsync(e, reply);
                 return true;

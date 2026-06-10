@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Utilities;
 
 namespace CandyCottage.CandyBot.Services;

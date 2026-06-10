@@ -1,8 +1,8 @@
 using CandyBot.Tests.Fakes;
 using CandyBot.Tests.Utilities;
+using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services;
-using CandyCottage.CandyBot.Services.BotServices;
 using CandyCottage.CandyBot.Utilities;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Memory;
@@ -21,8 +21,8 @@ namespace CandyBot.Tests.Services;
 public class FeatureSwitchCommandTests
 {
     private static CandyBotService CreateService(IBotReplySender botService, CandyBotFunctionConfig cfg, IMemoryCache cache) =>
-        new(NullLogger<CandyBotService>.Instance, cache, sql: null!, cfg, forzaConfig: null!, taskQueue: null!, taskManager: null!,
-            botService, bettingService: null!, sqlInitService: null!, userService: null!, forzaService: null!, forzaSheetImporter: null!, esportsSyncService: null!, userAPITokenService: null!);
+        new(NullLogger<CandyBotService>.Instance, cache, sql: null!, cfg, forzaConfig: null!, taskQueue: null!, taskManager: null!, taskSchedulerExecutor: null!,
+            botService, bettingService: null!, sqlInitService: null!, userService: null!, forzaService: null!, esportsSyncService: null!, userAPITokenService: null!);
 
     [Fact]
     public async Task 管理员发送关闭地平线_应写入false并回复地平线模块已关闭()
