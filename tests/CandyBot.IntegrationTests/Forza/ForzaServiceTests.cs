@@ -309,21 +309,23 @@ public class ForzaServiceTests(MySqlFixture fixture)
     public async Task UpdateVehicle_修改字段后可查询到新值()
     {
         await _fixture.ResetDataAsync();
-        int id = SeedVehicle(MinimalVehicle("Toyota", "Supra", "S1", "Road", "RWD"));
+        int vehicleId = SeedVehicle(MinimalVehicle("Toyota", "Supra", "S1", "Road", "RWD"));
 
+        // 新路径：通过 UpdateVehicleModel 修改车型的 Model 字段
         using MySQLHelper sql = _fixture.CreateHelper();
         ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
-        VehicleRequest upd = new() { Id = id, Remarks = "极好操控" };
-        bool ok = svc.UpdateVehicle(upd, out string error);
+        VehicleModelRequest upd = new() { Id = vehicleId, Manufacturer = "Toyota", Model = "Supra GR" };
+        bool ok = svc.UpdateVehicleModel(upd, actorUserId: 0, out string error);
 
         ok.Should().BeTrue(error);
 
-        // 查询验证 Remarks 已更新
+        // 查询验证 Model 已更新
         using MySQLHelper probe = _fixture.CreateHelper();
         ForzaService probeSvc = new(NullLogger<ForzaService>.Instance, probe, _forzaConfig);
-        var (success, _, data, _) = probeSvc.GetVehicleById(id);
+        var (success, _, data, _) = probeSvc.GetVehicleModelById(vehicleId);
         success.Should().BeTrue();
-        data!.Rows[0]["Remarks"].ToString().Should().Be("极好操控");
+        data!.Rows[0]["Model"].ToString().Should().Be("Supra GR");
+        data.Rows[0]["Manufacturer"].ToString().Should().Be("Toyota");
     }
 
     // =========================================================================
@@ -678,19 +680,20 @@ public class ForzaServiceTests(MySqlFixture fixture)
     public async Task GetVehicleById_返回指定车辆而非全部行()
     {
         await _fixture.ResetDataAsync();
-        // 种两辆车，确保表中有 ≥2 行，证明 @id 绑定是有效区分条件
+        // 种两辆车型，确保 Vehicles 表中有 ≥2 行，证明 @id 绑定是有效区分条件
         int id1 = SeedVehicle(MinimalVehicle("Alpha", "X1", "S1", "Road", "AWD"));
         int id2 = SeedVehicle(MinimalVehicle("Beta", "Y2", "A", "Rally", "FWD"));
 
         using MySQLHelper sql = _fixture.CreateHelper();
         ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
-        var (success, _, data, _) = svc.GetVehicleById(id1);
+        // 新路径：按 VehicleId 精确查 Vehicles 表，不走 JOIN
+        var (success, _, data, _) = svc.GetVehicleModelById(id1);
 
         success.Should().BeTrue();
         data.Should().NotBeNull();
-        // 若 @id 未绑定，WHERE Id=@id 会失败或返回全部行；正确绑定只返回 1 行
-        data!.Rows.Count.Should().Be(1, "只应返回 Id 匹配的那一行，而不是全部行");
+        // 正确绑定只返回 1 行（Vehicle 而非 Tune）
+        data!.Rows.Count.Should().Be(1, "只应返回 VehicleId 匹配的那一行，而不是全部行");
         data.Rows[0]["Manufacturer"].ToString().Should().Be("Alpha");
         data.Rows[0]["Model"].ToString().Should().Be("X1");
         // 确保没有把 id2 的行包含进来
@@ -711,35 +714,6 @@ public class ForzaServiceTests(MySqlFixture fixture)
         // 查询本身执行成功，但无匹配行（success=true, Rows.Count=0, totalPages=0）
         (success == false || data == null || data.Rows.Count == 0).Should().BeTrue(
             "不存在的 ID 应返回空结果或失败，而非随机返回行");
-    }
-
-    [Fact]
-    public async Task GetVehicleById_通过控制器调用_存在时返回OkResult()
-    {
-        await _fixture.ResetDataAsync();
-        int id = SeedVehicle(MinimalVehicle("Honda", "NSX", "S2", "Road", "AWD"));
-
-        using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
-        ForzaController controller = new(svc);
-
-        IActionResult result = controller.GetVehicleById(id);
-
-        result.Should().BeOfType<OkObjectResult>("存在的车辆应返回 200 OK");
-    }
-
-    [Fact]
-    public async Task GetVehicleById_通过控制器调用_不存在时返回NotFoundResult()
-    {
-        await _fixture.ResetDataAsync();
-
-        using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
-        ForzaController controller = new(svc);
-
-        IActionResult result = controller.GetVehicleById(999999);
-
-        result.Should().BeOfType<NotFoundObjectResult>("不存在的车辆应返回 404 Not Found");
     }
 
     // =========================================================================
@@ -1329,5 +1303,246 @@ public class ForzaServiceTests(MySqlFixture fixture)
         data.Should().NotBeNull();
         data!.Rows.Count.Should().Be(12, "第 1 页应返回 12 条（pageSize 默认 12）");
         totalPages.Should().Be(2, "16 条调校 / 12 = ceil(1.33) = 2 页");
+    }
+
+    // =========================================================================
+    // Task 17 — 控制器 VehicleId vs TuneId 路由语义
+    // =========================================================================
+
+    /// <summary>
+    /// GET /Forza/vehicles/{id} 中 id 是 VehicleId（Vehicles.Id 主键）。
+    /// 响应体包含 vehicle 字段（vehicleId 显式）+ tunes 数组。
+    /// </summary>
+    [Fact]
+    public async Task GetVehicleById_通过控制器调用_存在时返回OkResult()
+    {
+        await _fixture.ResetDataAsync();
+        int id = SeedVehicle(MinimalVehicle("Honda", "NSX", "S2", "Road", "AWD"));
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        ForzaController controller = new(svc);
+
+        IActionResult result = controller.GetVehicleById(id);
+
+        result.Should().BeOfType<OkObjectResult>("存在的车型应返回 200 OK");
+
+        // 验证响应体包含 vehicle 字段
+        var ok = (OkObjectResult)result;
+        var body = ok.Value!;
+        var vehicleProp = body.GetType().GetProperty("vehicle");
+        vehicleProp.Should().NotBeNull("响应体应含 vehicle 字段");
+        var vehicleValue = vehicleProp!.GetValue(body);
+        vehicleValue.Should().NotBeNull();
+        // vehicleId 字段明确是车型主键
+        var vehicleIdProp = vehicleValue!.GetType().GetProperty("vehicleId");
+        vehicleIdProp.Should().NotBeNull("vehicle 对象应含 vehicleId 字段，区别于 TuneId");
+        Convert.ToInt32(vehicleIdProp!.GetValue(vehicleValue)).Should().Be(id);
+    }
+
+    [Fact]
+    public async Task GetVehicleById_通过控制器调用_不存在时返回NotFoundResult()
+    {
+        await _fixture.ResetDataAsync();
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        ForzaController controller = new(svc);
+
+        IActionResult result = controller.GetVehicleById(999999);
+
+        result.Should().BeOfType<NotFoundObjectResult>("不存在的车型应返回 404 Not Found");
+    }
+
+    /// <summary>
+    /// GET /Forza/tunes/{id} 中 id 是 TuneId（VehicleTunes.Id 主键）。
+    /// 响应体含 tuneId 字段，明确区别于 VehicleId。
+    /// </summary>
+    [Fact]
+    public async Task GetTuneById_通过控制器调用_存在时返回OkResult含tuneId()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "TuneCtrl", Model = "TuneCtrlModel" },
+            0, out string modelErr);
+        modelErr.Should().BeEmpty();
+        vehicleId.Should().BeGreaterThan(0);
+
+        // 插入调校
+        int tuneId = SeedTune(MinimalTuneRequest(vehicleId, cls: "A", matchType: "Road", drivetrain: "AWD"));
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        ForzaController controller = new(svc);
+
+        IActionResult result = controller.GetTuneById(tuneId);
+
+        result.Should().BeOfType<OkObjectResult>("存在的调校应返回 200 OK");
+
+        // 验证响应体的 tuneId 字段是调校主键（不是 vehicleId）
+        var ok = (OkObjectResult)result;
+        var body = ok.Value!;
+        var tuneIdProp = body.GetType().GetProperty("tuneId");
+        tuneIdProp.Should().NotBeNull("响应体应含 tuneId 字段，区别于 vehicleId");
+        Convert.ToInt32(tuneIdProp!.GetValue(body)).Should().Be(tuneId);
+    }
+
+    [Fact]
+    public async Task GetTuneById_通过控制器调用_不存在时返回NotFoundResult()
+    {
+        await _fixture.ResetDataAsync();
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        ForzaController controller = new(svc);
+
+        IActionResult result = controller.GetTuneById(999999);
+
+        result.Should().BeOfType<NotFoundObjectResult>("不存在的调校应返回 404 Not Found");
+    }
+
+    /// <summary>
+    /// POST /Forza/tunes 新增手动调校，响应 tuneId。
+    /// </summary>
+    [Fact]
+    public async Task PostTune_通过控制器调用_合法请求返回tuneId()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "PostTuneMaker", Model = "PostTuneModel" },
+            0, out string modelErr);
+        modelErr.Should().BeEmpty();
+        vehicleId.Should().BeGreaterThan(0);
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        ForzaController controller = new(svc);
+
+        VehicleTuneRequest req = new()
+        {
+            VehicleId = vehicleId,
+            Class = "S1",
+            MatchType = "Road",
+            Drivetrain = "AWD",
+            Strength = "META",
+        };
+        IActionResult result = controller.AddTune(req);
+
+        result.Should().BeOfType<OkObjectResult>("合法调校新增应返回 200 OK");
+
+        var ok = (OkObjectResult)result;
+        var body = ok.Value!;
+        var tuneIdProp = body.GetType().GetProperty("tuneId");
+        tuneIdProp.Should().NotBeNull("响应体应含 tuneId 字段");
+        Convert.ToInt32(tuneIdProp!.GetValue(body)).Should().BeGreaterThan(0);
+    }
+
+    /// <summary>
+    /// DELETE /Forza/vehicles/{id} 删除车型时，FK CASCADE 级联删除其全部调校。
+    /// 通过控制器调用验证语义：返回 200 且调校也已消失。
+    /// </summary>
+    [Fact]
+    public async Task DeleteVehicle_通过控制器调用_级联删除全部调校()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型 + 两条调校（用 AddTune 保证手动路径 seq 自动递增，避免唯一键冲突）
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "DelCtrlMaker", Model = "DelCtrlModel" },
+            0, out string modelErr);
+        modelErr.Should().BeEmpty();
+        vehicleId.Should().BeGreaterThan(0);
+
+        using MySQLHelper sqlTune1 = _fixture.CreateHelper();
+        ForzaService svcTune1 = new(NullLogger<ForzaService>.Instance, sqlTune1, _forzaConfig);
+        int tuneId1 = svcTune1.AddTune(new VehicleTuneRequest
+            { VehicleId = vehicleId, Class = "A", MatchType = "Road", Drivetrain = "AWD" }, 0, out string err1);
+        err1.Should().BeEmpty();
+        tuneId1.Should().BeGreaterThan(0);
+
+        using MySQLHelper sqlTune2 = _fixture.CreateHelper();
+        ForzaService svcTune2 = new(NullLogger<ForzaService>.Instance, sqlTune2, _forzaConfig);
+        int tuneId2 = svcTune2.AddTune(new VehicleTuneRequest
+            { VehicleId = vehicleId, Class = "S1", MatchType = "Road", Drivetrain = "RWD" }, 0, out string err2);
+        err2.Should().BeEmpty();
+        tuneId2.Should().BeGreaterThan(0);
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        ForzaController controller = new(svc);
+
+        IActionResult result = controller.DeleteVehicleModel(vehicleId);
+
+        result.Should().BeOfType<OkObjectResult>("删除存在的车型应返回 200 OK");
+
+        // 验证 Vehicles 和 VehicleTunes 均已删除（FK CASCADE）
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? vRow = probe.ExecuteDataRow($"SELECT COUNT(*) FROM Vehicles WHERE Id = {vehicleId}");
+        Convert.ToInt32(vRow![0]).Should().Be(0, "车型行应已删除");
+
+        DataRow? tRow = probe.ExecuteDataRow(
+            $"SELECT COUNT(*) FROM VehicleTunes WHERE Id IN ({tuneId1}, {tuneId2})");
+        Convert.ToInt32(tRow![0]).Should().Be(0, "DELETE vehicles/{id} 应通过 FK CASCADE 级联删除全部调校");
+    }
+
+    /// <summary>
+    /// DELETE /Forza/tunes/{id} 仅删除指定调校，不影响车型及其他调校。
+    /// </summary>
+    [Fact]
+    public async Task DeleteTune_通过控制器调用_仅删除指定调校()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型 + 两条调校（用 AddTune 保证手动路径 seq 自动递增，避免唯一键冲突）
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "DelTuneCtrl", Model = "DelTuneCtrlModel" },
+            0, out string modelErr);
+        modelErr.Should().BeEmpty();
+
+        using MySQLHelper sqlTune1 = _fixture.CreateHelper();
+        ForzaService svcTune1 = new(NullLogger<ForzaService>.Instance, sqlTune1, _forzaConfig);
+        int tuneId1 = svcTune1.AddTune(new VehicleTuneRequest
+            { VehicleId = vehicleId, Class = "A", MatchType = "Road", Drivetrain = "AWD" }, 0, out string err1);
+        err1.Should().BeEmpty();
+        tuneId1.Should().BeGreaterThan(0);
+
+        using MySQLHelper sqlTune2 = _fixture.CreateHelper();
+        ForzaService svcTune2 = new(NullLogger<ForzaService>.Instance, sqlTune2, _forzaConfig);
+        int tuneId2 = svcTune2.AddTune(new VehicleTuneRequest
+            { VehicleId = vehicleId, Class = "S1", MatchType = "Road", Drivetrain = "RWD" }, 0, out string err2);
+        err2.Should().BeEmpty();
+        tuneId2.Should().BeGreaterThan(0);
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        ForzaController controller = new(svc);
+
+        // 只删除 tuneId1
+        IActionResult result = controller.DeleteTune(tuneId1);
+
+        result.Should().BeOfType<OkObjectResult>("删除存在的调校应返回 200 OK");
+
+        // tuneId1 已删除，tuneId2 保留，车型也保留
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? t1Row = probe.ExecuteDataRow($"SELECT COUNT(*) FROM VehicleTunes WHERE Id = {tuneId1}");
+        Convert.ToInt32(t1Row![0]).Should().Be(0, "tuneId1 应已删除");
+
+        DataRow? t2Row = probe.ExecuteDataRow($"SELECT COUNT(*) FROM VehicleTunes WHERE Id = {tuneId2}");
+        Convert.ToInt32(t2Row![0]).Should().Be(1, "tuneId2 应仍存在");
+
+        DataRow? vRow = probe.ExecuteDataRow($"SELECT COUNT(*) FROM Vehicles WHERE Id = {vehicleId}");
+        Convert.ToInt32(vRow![0]).Should().Be(1, "车型应仍存在");
     }
 }

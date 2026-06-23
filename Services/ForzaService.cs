@@ -1225,6 +1225,19 @@ namespace CandyCottage.CandyBot.Services
         }
 
         /// <summary>
+        /// 按 TuneId 查询单条调校记录（VehicleTunes 主键精确匹配）。
+        /// totalPages 固定为 1（单行精确匹配，无分页需求）。
+        /// </summary>
+        public (bool success, string message, DataRow? row) GetTuneById(int tuneId)
+        {
+            sql.Parameters["@tid"] = tuneId;
+            DataRow? row = sql.ExecuteDataRow("SELECT * FROM VehicleTunes WHERE Id = @tid");
+            if (!sql.Success || row == null)
+                return (false, "未找到对应的调校记录。", null);
+            return (true, "success", row);
+        }
+
+        /// <summary>
         /// 按状态分页查询调校记录（镜像 GetVehicleDataTable 的分页风格）。
         /// status 对应 TuneStatus 列（如"正常"/"存疑"/"弃用"）。
         /// </summary>

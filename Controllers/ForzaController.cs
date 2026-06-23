@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -10,6 +10,8 @@ namespace CandyCottage.CandyBot.Controllers
     [Route("[controller]")]
     public class ForzaController(ForzaService forzaService) : ControllerBase
     {
+        // ==================== 车辆搜索端点（保持向后兼容，按调校行分页） ====================
+
         [AllowAnonymous]
         [HttpGet("vehicles")]
         public IActionResult GetVehicles([FromQuery] string? name, [FromQuery] string? classType, [FromQuery] string? matchType, [FromQuery] int page = 1)
@@ -38,62 +40,87 @@ namespace CandyCottage.CandyBot.Controllers
             }
         }
 
+        // ==================== 车型（VehicleId）端点 ====================
+
+        /// <summary>
+        /// 查询指定车型及其全部调校，id 为 VehicleId（Vehicles.Id 主键）。
+        /// 响应：{ success, vehicle: {...}, tunes: [...] }；车型不存在时 404。
+        /// </summary>
         [AllowAnonymous]
-        [HttpGet("vehicles/{id}")]
+        [HttpGet("vehicles/{id:int}")]
         public IActionResult GetVehicleById(int id)
         {
-            var (success, _, data, _) = forzaService.GetVehicleById(id);
-            if (!success || data == null || data.Rows.Count == 0)
-                return NotFound(new { success = false, message = $"未找到 ID 为 {id} 的车辆" });
+            var (vSuccess, _, vData, _) = forzaService.GetVehicleModelById(id);
+            if (!vSuccess || vData == null || vData.Rows.Count == 0)
+                return NotFound(new { success = false, message = $"未找到 ID 为 {id} 的车型" });
 
-            var vehicle = ConvertDataRowToVehicle(data.Rows[0]);
-            return Ok(new { success = true, vehicle });
+            object vehicle = ConvertDataRowToVehicleModel(vData.Rows[0]);
+
+            // 调校列表：无调校时返回空数组，而非 404（车型可以暂无调校）
+            var (tSuccess, _, tData, _) = forzaService.GetTunesByVehicleId(id);
+            List<object> tunes = tSuccess && tData != null
+                ? ConvertDataTableToTunes(tData)
+                : [];
+
+            return Ok(new { success = true, vehicle, tunes });
         }
 
+        /// <summary>
+        /// 新增或幂等取回车型；id 参数不适用（由 ModelKey 唯一决定）。
+        /// 响应：{ success, vehicleId }
+        /// </summary>
         [Authorize(Roles = "admin,op")]
         [HttpPost("vehicles")]
-        public IActionResult AddVehicle([FromBody] VehicleRequest request)
+        public IActionResult AddVehicleModel([FromBody] VehicleModelRequest request)
         {
             if (request == null)
                 return BadRequest(new { success = false, message = "请求体不能为空" });
 
-            bool result = forzaService.AddVehicle(request, out string error);
-            if (result)
-                return Ok(new { success = true, message = "车辆新增成功" });
-            else
+            // actorUserId：从 JWT Claims 取，此处简化为常量（调用方凭 Bearer token 已鉴权）
+            int vehicleId = forzaService.EnsureVehicleModel(request, actorUserId: 0, out string error);
+            if (vehicleId == 0)
                 return BadRequest(new { success = false, message = error });
+
+            return Ok(new { success = true, vehicleId });
         }
 
+        /// <summary>更新车型的 Manufacturer/Model/Year。id 为 VehicleId。</summary>
         [Authorize(Roles = "admin,op")]
-        [HttpPut("vehicles/{id}")]
-        public IActionResult UpdateVehicle(int id, [FromBody] VehicleRequest request)
+        [HttpPut("vehicles/{id:int}")]
+        public IActionResult UpdateVehicleModel(int id, [FromBody] VehicleModelRequest request)
         {
             if (request == null)
                 return BadRequest(new { success = false, message = "请求体不能为空" });
 
             request.Id = id;
-            bool result = forzaService.UpdateVehicle(request, out string error);
+            bool result = forzaService.UpdateVehicleModel(request, actorUserId: 0, out string error);
             if (result)
-                return Ok(new { success = true, message = "车辆修改成功" });
+                return Ok(new { success = true, message = "车型修改成功" });
             else
                 return BadRequest(new { success = false, message = error });
         }
 
+        /// <summary>
+        /// 删除单个车型（及其全部调校，由 FK CASCADE 处理）。id 为 VehicleId。
+        /// </summary>
         [Authorize(Roles = "admin,op")]
-        [HttpDelete("vehicles/{id}")]
-        public IActionResult DeleteVehicle(int id)
+        [HttpDelete("vehicles/{id:int}")]
+        public IActionResult DeleteVehicleModel(int id)
         {
-            var (success, message, deletedCount) = forzaService.DeleteVehiclesByIds([id]);
+            var (success, message, deletedCount) = forzaService.DeleteVehicleModelsByIds([id]);
             if (!success)
                 return BadRequest(new { success = false, message });
             if (deletedCount == 0)
                 return NotFound(new { success = false, message });
-            return Ok(new { success = true, message = $"已删除车辆 ID {id}" });
+            return Ok(new { success = true, message = $"已删除车型 ID {id}（及其全部关联调校）" });
         }
 
+        /// <summary>
+        /// 批量删除车型（及各自全部调校，由 FK CASCADE 处理）。?ids=1,2,3
+        /// </summary>
         [Authorize(Roles = "admin,op")]
         [HttpDelete("vehicles")]
-        public IActionResult DeleteVehicles([FromQuery] string ids)
+        public IActionResult DeleteVehicleModels([FromQuery] string ids)
         {
             if (string.IsNullOrWhiteSpace(ids))
                 return BadRequest(new { success = false, message = "请提供 ids 参数，例如 ?ids=1,2,3" });
@@ -102,12 +129,16 @@ namespace CandyCottage.CandyBot.Controllers
             if (idList.Count == 0)
                 return BadRequest(new { success = false, message = "ids 中未包含有效的数字 ID" });
 
-            var (success, message, deletedCount) = forzaService.DeleteVehiclesByIds(idList);
+            var (success, message, deletedCount) = forzaService.DeleteVehicleModelsByIds(idList);
             if (!success)
                 return BadRequest(new { success = false, message });
-            return Ok(new { success = true, message = $"成功删除 {deletedCount} 辆车" });
+            return Ok(new { success = true, message = $"成功删除 {deletedCount} 个车型（含全部关联调校）" });
         }
 
+        /// <summary>
+        /// 按车型属性查找候选车型，返回 VehicleId + DisplayName 列表。
+        /// 用于在新增调校前定位目标车型。
+        /// </summary>
         [Authorize(Roles = "admin,op")]
         [HttpGet("vehicles/match")]
         public IActionResult MatchVehicles([FromQuery] string manufacturer, [FromQuery] string model, [FromQuery] string year, [FromQuery] string classType, [FromQuery] string matchType)
@@ -122,40 +153,97 @@ namespace CandyCottage.CandyBot.Controllers
             };
             var (success, message, matches) = forzaService.FindVehiclesByCriteria(request);
             if (!success || matches == null || matches.Count == 0)
-                return Ok(new { success = false, message = message ?? "未找到匹配车辆", matches = Array.Empty<object>() });
+                return Ok(new { success = false, message = message ?? "未找到匹配车型", matches = Array.Empty<object>() });
 
-            return Ok(new { success = true, message = $"找到 {matches.Count} 辆匹配车辆", matches });
+            return Ok(new { success = true, message = $"找到 {matches.Count} 个匹配车型", matches });
         }
 
-        private static List<object> ConvertDataTableToVehicles(DataTable dt)
+        // ==================== 调校（TuneId）端点 ====================
+
+        /// <summary>
+        /// 查询单条调校记录，id 为 TuneId（VehicleTunes.Id 主键）。
+        /// 响应：{ success, tuneId, tune: {...} }；调校不存在时 404。
+        /// </summary>
+        [AllowAnonymous]
+        [HttpGet("tunes/{id:int}")]
+        public IActionResult GetTuneById(int id)
         {
-            List<object> list = [];
-            foreach (DataRow row in dt.Rows)
-            {
-                list.Add(ConvertDataRowToVehicle(row));
-            }
-            return list;
+            var (success, _, row) = forzaService.GetTuneById(id);
+            if (!success || row == null)
+                return NotFound(new { success = false, message = $"未找到 ID 为 {id} 的调校记录" });
+
+            object tune = ConvertDataRowToTune(row);
+            return Ok(new { success = true, tuneId = id, tune });
         }
 
-        private static object ConvertDataRowToVehicle(DataRow row)
+        /// <summary>
+        /// 手动新增调校（IsManual=1）；VehicleId/Class/MatchType/Drivetrain 必填。
+        /// 响应：{ success, tuneId }
+        /// </summary>
+        [Authorize(Roles = "admin,op")]
+        [HttpPost("tunes")]
+        public IActionResult AddTune([FromBody] VehicleTuneRequest request)
         {
-            return new
-            {
-                Id = Convert.ToInt32(row["Id"]),
-                Class = row["Class"]?.ToString(),
-                MatchType = row["MatchType"]?.ToString(),
-                Manufacturer = row["Manufacturer"]?.ToString(),
-                Model = row["Model"]?.ToString(),
-                Year = row["Year"]?.ToString(),
-                Drivetrain = row["Drivetrain"]?.ToString(),
-                Attribute = row["Attribute"]?.ToString(),
-                TireCompound = row["TireCompound"]?.ToString(),
-                SurfaceCondition = row["SurfaceCondition"]?.ToString(),
-                Strength = row["Strength"]?.ToString(),
-                Tune = row["Tune"]?.ToString(),
-                Remarks = row["Remarks"]?.ToString(),
-                LapTime = row["LapTime"]?.ToString()
-            };
+            if (request == null)
+                return BadRequest(new { success = false, message = "请求体不能为空" });
+
+            int tuneId = forzaService.AddTune(request, actorUserId: 0, out string error);
+            if (tuneId == 0)
+                return BadRequest(new { success = false, message = error });
+
+            return Ok(new { success = true, tuneId });
+        }
+
+        /// <summary>
+        /// 编辑调校显示值（Class、MatchType、Drivetrain 等），冻结 SourceIdentity 和 SourceFingerprint。
+        /// id 为 TuneId。
+        /// </summary>
+        [Authorize(Roles = "admin,op")]
+        [HttpPut("tunes/{id:int}")]
+        public IActionResult UpdateTune(int id, [FromBody] VehicleTuneRequest request)
+        {
+            if (request == null)
+                return BadRequest(new { success = false, message = "请求体不能为空" });
+
+            request.Id = id;
+            bool result = forzaService.UpdateTune(request, actorUserId: 0, out string error);
+            if (result)
+                return Ok(new { success = true, message = "调校修改成功" });
+            else
+                return BadRequest(new { success = false, message = error });
+        }
+
+        /// <summary>
+        /// 删除单条调校，同时清除对应缓存行。id 为 TuneId。
+        /// </summary>
+        [Authorize(Roles = "admin,op")]
+        [HttpDelete("tunes/{id:int}")]
+        public IActionResult DeleteTune(int id)
+        {
+            var (success, message, deletedCount) = forzaService.DeleteTunesByIds([id]);
+            if (!success)
+                return BadRequest(new { success = false, message });
+            if (deletedCount == 0)
+                return NotFound(new { success = false, message });
+            return Ok(new { success = true, message = $"已删除调校 ID {id}" });
+        }
+
+        /// <summary>批量删除调校（同时清除对应缓存行）。?ids=1,2,3</summary>
+        [Authorize(Roles = "admin,op")]
+        [HttpDelete("tunes")]
+        public IActionResult DeleteTunes([FromQuery] string ids)
+        {
+            if (string.IsNullOrWhiteSpace(ids))
+                return BadRequest(new { success = false, message = "请提供 ids 参数，例如 ?ids=1,2,3" });
+
+            List<int> idList = [.. ids.Split(',').Where(s => int.TryParse(s, out _)).Select(int.Parse)];
+            if (idList.Count == 0)
+                return BadRequest(new { success = false, message = "ids 中未包含有效的数字 ID" });
+
+            var (success, message, deletedCount) = forzaService.DeleteTunesByIds(idList);
+            if (!success)
+                return BadRequest(new { success = false, message });
+            return Ok(new { success = true, message = $"成功删除 {deletedCount} 条调校" });
         }
 
         // ==================== 赛道端点 ====================
@@ -269,6 +357,89 @@ namespace CandyCottage.CandyBot.Controllers
                 return Ok(new { success = false, message = message ?? "未找到匹配赛道", matches = Array.Empty<object>() });
 
             return Ok(new { success = true, message = $"找到 {matches.Count} 条匹配赛道", matches });
+        }
+
+        // ==================== 私有辅助方法 ====================
+
+        private static List<object> ConvertDataTableToVehicles(DataTable dt)
+        {
+            List<object> list = [];
+            foreach (DataRow row in dt.Rows)
+            {
+                list.Add(ConvertDataRowToVehicle(row));
+            }
+            return list;
+        }
+
+        /// <summary>将 JOIN 查询结果行（含旧别名 Attribute/Tune）转换为响应对象。</summary>
+        private static object ConvertDataRowToVehicle(DataRow row)
+        {
+            return new
+            {
+                Id = Convert.ToInt32(row["Id"]),
+                Class = row["Class"]?.ToString(),
+                MatchType = row["MatchType"]?.ToString(),
+                Manufacturer = row["Manufacturer"]?.ToString(),
+                Model = row["Model"]?.ToString(),
+                Year = row["Year"]?.ToString(),
+                Drivetrain = row["Drivetrain"]?.ToString(),
+                Attribute = row["Attribute"]?.ToString(),
+                TireCompound = row["TireCompound"]?.ToString(),
+                SurfaceCondition = row["SurfaceCondition"]?.ToString(),
+                Strength = row["Strength"]?.ToString(),
+                Tune = row["Tune"]?.ToString(),
+                Remarks = row["Remarks"]?.ToString(),
+                LapTime = row["LapTime"]?.ToString()
+            };
+        }
+
+        /// <summary>将 Vehicles 表行转换为车型响应对象，显式暴露 vehicleId 字段。</summary>
+        private static object ConvertDataRowToVehicleModel(DataRow row)
+        {
+            return new
+            {
+                vehicleId = Convert.ToInt32(row["Id"]),
+                Manufacturer = row["Manufacturer"]?.ToString(),
+                Model = row["Model"]?.ToString(),
+                Year = row["Year"]?.ToString(),
+                ModelKey = row["ModelKey"]?.ToString(),
+            };
+        }
+
+        private static List<object> ConvertDataTableToTunes(DataTable dt)
+        {
+            List<object> list = [];
+            foreach (DataRow row in dt.Rows)
+                list.Add(ConvertDataRowToTune(row));
+            return list;
+        }
+
+        /// <summary>将 VehicleTunes 表行转换为调校响应对象，显式暴露 tuneId 字段。</summary>
+        private static object ConvertDataRowToTune(DataRow row)
+        {
+            return new
+            {
+                tuneId = Convert.ToInt32(row["Id"]),
+                vehicleId = row.Table.Columns.Contains("VehicleId")
+                    ? Convert.ToInt32(row["VehicleId"])
+                    : (object?)null,
+                Class = row["Class"]?.ToString(),
+                MatchType = row["MatchType"]?.ToString(),
+                Drivetrain = row["Drivetrain"]?.ToString(),
+                PerformancePreference = row.Table.Columns.Contains("PerformancePreference")
+                    ? row["PerformancePreference"]?.ToString()
+                    : null,
+                TireCompound = row["TireCompound"]?.ToString(),
+                SurfaceCondition = row["SurfaceCondition"]?.ToString(),
+                Strength = row["Strength"]?.ToString(),
+                TuneRaw = row.Table.Columns.Contains("TuneRaw") ? row["TuneRaw"]?.ToString() : null,
+                Remarks = row["Remarks"]?.ToString(),
+                LapTime = row["LapTime"]?.ToString(),
+                TuneStatus = row.Table.Columns.Contains("TuneStatus") ? row["TuneStatus"]?.ToString() : null,
+                IsManual = row.Table.Columns.Contains("IsManual")
+                    ? Convert.ToInt32(row["IsManual"])
+                    : (object?)null,
+            };
         }
 
         private static List<object> ConvertDataTableToMaps(DataTable dt)
