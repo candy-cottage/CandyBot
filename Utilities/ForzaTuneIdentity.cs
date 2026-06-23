@@ -172,6 +172,22 @@ public static partial class ForzaTuneIdentity
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(joined));
         return Convert.ToHexStringLower(hash);
     }
+
+    /// <summary>
+    /// §7 完整快照判据（D2 保守版）：仅当本次解析没有任何班级 sheet 被跳过、没有任何班级 sheet 解析为 0 行、且无诊断失败时，
+    /// 才视为完整快照——只有完整快照才允许同步执行「未命中→删除/置已过时」。
+    /// </summary>
+    public static bool IsCompleteSnapshot(
+        IReadOnlyCollection<string> parsedClassSheets,
+        IReadOnlyCollection<string> skippedClassSheets,
+        IReadOnlyCollection<string> emptyClassSheets,
+        int diagnosticFailureCount)
+    {
+        // TODO(debt): 后续加「本次行数 ≥ 上次完整解析行数 * 阈值」的比例闸门
+        return skippedClassSheets.Count == 0
+            && emptyClassSheets.Count == 0
+            && diagnosticFailureCount == 0;
+    }
 }
 
 /// <summary>
