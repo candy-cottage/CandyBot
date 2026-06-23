@@ -71,14 +71,16 @@ public class ForzaSheetImporterTests(MySqlFixture fixture)
         using (sql1) first = await importer1.SyncLoadedSheetsAsync(sheets, fileId);
 
         first.Success.Should().BeTrue(first.ErrorMessage);
-        first.InsertedTuneCount.Should().BeGreaterThan(0, "首次导入应有新增调校行");
+        // 钉死：fixture DSXRieHNsZXpFZmZ4.json 解析结果确定性为 157 条调校行
+        first.InsertedTuneCount.Should().Be(157, "首次导入调校行数应与 fixture 一致");
 
         int tuneCount = CountRows("VehicleTunes");
         int vehicleCount = CountRows("Vehicles");
 
-        tuneCount.Should().Be(first.InsertedTuneCount, "调校行数应与 InsertedTuneCount 一致");
+        tuneCount.Should().Be(157, "VehicleTunes 行数应与 InsertedTuneCount 一致");
+        // 钉死：fixture 中独立车型（制造商+型号去重）为 124
+        vehicleCount.Should().Be(124, "车型数（去重）应与 fixture 一致");
         vehicleCount.Should().BeLessThan(tuneCount, "车型数（去重）应少于调校行数");
-        vehicleCount.Should().BeGreaterThan(0, "应有车型");
 
         // 第二次导入（幂等：同 fileId 完整快照）
         var (importer2, sql2) = NewImporter();
