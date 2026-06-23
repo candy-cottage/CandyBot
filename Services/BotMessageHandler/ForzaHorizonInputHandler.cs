@@ -303,6 +303,96 @@ public partial class CandyBotService
                 return true;
             }
 
+            // 新增车型：仅建 Vehicles 记录（制造商/型号/年份），不含调校字段
+            // 必须在 新增车辆 之前匹配，防止前缀被截断
+            if (e.Detail.StartsWith("新增车型"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["新增车型".Length..].Trim();
+                if (string.IsNullOrEmpty(detail))
+                {
+                    await botService.SendAsync(e,
+                        "格式：新增车型 制造商=xxx 型号=xxx [年份=yyyy]\r\n" +
+                        "必填字段：制造商、型号\r\n" +
+                        "示例：新增车型 制造商=法拉利 型号=F40 年份=1992");
+                    return true;
+                }
+
+                VehicleModelRequest modelReq = new();
+                if (!ParseModelKeyValuePairs(detail, modelReq, out string parseError))
+                {
+                    await botService.SendAsync(e, parseError);
+                    return true;
+                }
+
+                if (string.IsNullOrWhiteSpace(modelReq.Manufacturer) || string.IsNullOrWhiteSpace(modelReq.Model))
+                {
+                    md.Content = "缺少必填字段：制造商、型号都必须提供。";
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(1, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                int vehicleId = forzaService.EnsureVehicleModel(modelReq, user!.Id, out string addError);
+                reply.Keyboard = new KeyboardMessage();
+                if (vehicleId > 0)
+                {
+                    md.Content = $"✅ 车型新增/已存在，车辆ID：{vehicleId}。\r\n可用\"新增调校 车辆={vehicleId} 等级=xx 比赛类型=xx 驱动=xx\"添加调校。";
+                }
+                else
+                {
+                    md.Content = $"❌ 新增车型失败：{addError}";
+                }
+                reply.Keyboard.AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            // 新增调校：车辆ID必须已存在，等级/比赛类型/驱动为必填
+            // 必须在 新增车辆 之前匹配
+            if (e.Detail.StartsWith("新增调校"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["新增调校".Length..].Trim();
+                if (string.IsNullOrEmpty(detail))
+                {
+                    await botService.SendAsync(e,
+                        "格式：新增调校 车辆=<ID> 等级=xxx 比赛类型=xxx 驱动=xxx [属性= 胎面= 干湿地= 强度= 调校= 备注= 圈速=]\r\n" +
+                        "必填字段：车辆（车辆ID）、等级、比赛类型、驱动\r\n" +
+                        "示例：新增调校 车辆=1 等级=S1 比赛类型=公路 驱动=四驱 强度=META 调校=\"Nyasmowisher[be my light]\"\r\n" +
+                        "等级：S2, S1, A, B, C, R 或完整格式 S2-900 等\r\n" +
+                        "比赛类型：公路、拉力、泥地、越野、街头等\r\n" +
+                        "提示：先用\"新增车型\"获取车辆ID，再用本指令添加调校。");
+                    return true;
+                }
+
+                VehicleTuneRequest tuneReq = new();
+                if (!ParseTuneKeyValuePairs(detail, tuneReq, out string parseError))
+                {
+                    await botService.SendAsync(e, parseError);
+                    return true;
+                }
+
+                reply.Keyboard = new KeyboardMessage();
+                int tuneId = forzaService.AddTune(tuneReq, user!.Id, out string addError);
+                if (tuneId > 0)
+                {
+                    md.Content = $"✅ 调校新增成功！调校ID：{tuneId}。";
+                }
+                else
+                {
+                    md.Content = $"❌ 新增调校失败：{addError}";
+                }
+                reply.Keyboard.AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            // 新增车辆：兼容别名，同时创建车型和调校
             if (e.Detail.StartsWith("新增车辆"))
             {
                 if (!await CheckUser(e, user, false))
@@ -314,47 +404,58 @@ public partial class CandyBotService
                 if (string.IsNullOrEmpty(detail))
                 {
                     await botService.SendAsync(e,
-                        "格式：新增车辆 制造商=xxx 型号=xxx 等级=xxx 比赛类型=xxx 驱动类型=xxx [其他参数]\r\n" +
-                        "必填字段：制造商、型号、等级、比赛类型、驱动类型\r\n" +
-                        "可用参数：传动= 属性= 胎面= 适用干/湿= 强度= 调校= 备注= 圈速=\r\n" +
-                        "示例：新增车辆 制造商=法拉利 型号=F40 年份=1992 等级=S1 比赛类型=公路 驱动类型=四驱 强度=META 调校=\"Nyasmowisher[be my light]\"\r\n" +
+                        "格式：新增车辆 制造商=xxx 型号=xxx 等级=xxx 比赛类型=xxx 驱动=xxx [其他参数]\r\n" +
+                        "必填字段：制造商、型号、等级、比赛类型、驱动\r\n" +
+                        "可用参数：年份= 属性= 胎面= 干湿地= 强度= 调校= 备注= 圈速=\r\n" +
+                        "示例：新增车辆 制造商=法拉利 型号=F40 年份=1992 等级=S1 比赛类型=公路 驱动=四驱 强度=META 调校=\"Nyasmowisher[be my light]\"\r\n" +
                         "等级：S2, S1, A, B, C, R 或完整格式 S2-900 等\r\n" +
-                        "比赛类型：公路、拉力、泥地、越野、街头等");
+                        "比赛类型：公路、拉力、泥地、越野、街头等\r\n" +
+                        "提示：也可分两步：先\"新增车型\"，再\"新增调校\"。");
                     return true;
                 }
 
-                VehicleRequest request = new();
-                if (!ParseKeyValuePairs(detail, request, out string parseError))
+                // 解析所有参数（车型+调校字段混合）
+                VehicleModelRequest modelReq2 = new();
+                VehicleTuneRequest tuneReq2 = new();
+                if (!ParseCombinedVehicleKeyValuePairs(detail, modelReq2, tuneReq2, out string parseError))
                 {
                     await botService.SendAsync(e, parseError);
                     return true;
                 }
 
                 // 检查必填字段
-                if (string.IsNullOrEmpty(request.Manufacturer) ||
-                    string.IsNullOrEmpty(request.Model) ||
-                    string.IsNullOrEmpty(request.Class) ||
-                    string.IsNullOrEmpty(request.MatchType) ||
-                    string.IsNullOrEmpty(request.Drivetrain))
+                if (string.IsNullOrWhiteSpace(modelReq2.Manufacturer) || string.IsNullOrWhiteSpace(modelReq2.Model) ||
+                    string.IsNullOrWhiteSpace(tuneReq2.Class) || string.IsNullOrWhiteSpace(tuneReq2.MatchType) ||
+                    string.IsNullOrWhiteSpace(tuneReq2.Drivetrain))
                 {
-                    md.Content = "缺少必填字段：制造商、型号、等级、比赛类型、驱动类型都必须提供。";
+                    md.Content = "缺少必填字段：制造商、型号、等级、比赛类型、驱动都必须提供。";
                     reply.Keyboard = new KeyboardMessage().AppendButtons(1, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
                     await botService.SendAsync(e, reply);
                     return true;
                 }
 
                 reply.Keyboard = new KeyboardMessage();
-                if (forzaService.AddVehicle(request, out string error))
+
+                // 第一步：确保车型存在
+                int vid = forzaService.EnsureVehicleModel(modelReq2, user!.Id, out string modelError);
+                if (vid == 0)
                 {
-                    md.Content = "✅ 车辆新增成功！";
+                    md.Content = $"❌ 新增车型失败：{modelError}";
+                    reply.Keyboard.AppendButtons(2, ForzaNavButtons());
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                // 第二步：新增调校
+                tuneReq2.VehicleId = vid;
+                int newTuneId = forzaService.AddTune(tuneReq2, user!.Id, out string tuneError);
+                if (newTuneId > 0)
+                {
+                    md.Content = $"✅ 车辆新增成功！车辆ID：{vid}，调校ID：{newTuneId}。";
                 }
                 else
                 {
-                    md.Content = $"❌ 新增失败：{error}";
-                    if (md.Content.Contains("请使用“修改车辆”指令"))
-                    {
-                        reply.Keyboard.AppendButtons(2, Button.CreateCmdButton("🔁 修改车辆", e.Detail.Replace("新增车辆", "修改车辆"), false));
-                    }
+                    md.Content = $"❌ 车型已创建（ID：{vid}），但新增调校失败：{tuneError}";
                 }
 
                 reply.Keyboard.AppendButtons(2, ForzaNavButtons());
@@ -940,6 +1041,196 @@ public partial class CandyBotService
                 case "备注":
                 case "notes":
                     request.Notes = val;
+                    break;
+                default:
+                    error = $"未知参数：{key}";
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// 解析新增车型指令的键值对：支持 制造商/型号/年份。
+    /// </summary>
+    private static bool ParseModelKeyValuePairs(string input, VehicleModelRequest request, out string error)
+    {
+        error = "";
+        System.Text.RegularExpressions.MatchCollection matches = GetParamValue().Matches(input);
+        foreach (System.Text.RegularExpressions.Match m in matches)
+        {
+            string key = m.Groups[1].Value.ToLowerInvariant();
+            string val = m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Value;
+            switch (key)
+            {
+                case "制造商":
+                case "manufacturer":
+                    request.Manufacturer = val;
+                    break;
+                case "型号":
+                case "model":
+                    request.Model = val;
+                    break;
+                case "年份":
+                case "year":
+                    request.Year = val;
+                    break;
+                default:
+                    error = $"未知参数：{key}（新增车型仅支持：制造商、型号、年份）";
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// 解析新增调校指令的键值对：支持 车辆(ID)/等级/比赛类型/驱动 及可选展示字段。
+    /// </summary>
+    private static bool ParseTuneKeyValuePairs(string input, VehicleTuneRequest request, out string error)
+    {
+        error = "";
+        System.Text.RegularExpressions.MatchCollection matches = GetParamValue().Matches(input);
+        foreach (System.Text.RegularExpressions.Match m in matches)
+        {
+            string key = m.Groups[1].Value.ToLowerInvariant();
+            string val = m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Value;
+            switch (key)
+            {
+                case "车辆":
+                case "vehicleid":
+                    if (int.TryParse(val, out int vid))
+                        request.VehicleId = vid;
+                    else
+                    {
+                        error = "车辆参数必须为整数（车辆ID）。";
+                        return false;
+                    }
+                    break;
+                case "等级":
+                case "class":
+                    request.Class = val;
+                    break;
+                case "比赛类型":
+                case "matchtype":
+                    request.MatchType = val;
+                    break;
+                case "传动":
+                case "驱动":
+                case "drivetrain":
+                    request.Drivetrain = val;
+                    break;
+                case "属性":
+                case "performancepreference":
+                    request.PerformancePreference = val;
+                    break;
+                case "胎面":
+                case "tire":
+                case "tirecompound":
+                    request.TireCompound = val;
+                    break;
+                case "干湿地":
+                case "surface":
+                case "surfacecondition":
+                    request.SurfaceCondition = val;
+                    break;
+                case "强度":
+                case "strength":
+                    request.Strength = val;
+                    break;
+                case "调校":
+                case "tuneraw":
+                case "tune":
+                    request.TuneRaw = val;
+                    break;
+                case "备注":
+                case "notes":
+                case "remarks":
+                    request.Remarks = val;
+                    break;
+                case "圈速":
+                case "laptime":
+                    request.LapTime = val;
+                    break;
+                default:
+                    error = $"未知参数：{key}";
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// 解析新增车辆（兼容别名）指令的键值对：同时填充车型与调校请求。
+    /// 支持 制造商/型号/年份（车型字段）以及所有调校字段。
+    /// </summary>
+    private static bool ParseCombinedVehicleKeyValuePairs(string input, VehicleModelRequest modelReq, VehicleTuneRequest tuneReq, out string error)
+    {
+        error = "";
+        System.Text.RegularExpressions.MatchCollection matches = GetParamValue().Matches(input);
+        foreach (System.Text.RegularExpressions.Match m in matches)
+        {
+            string key = m.Groups[1].Value.ToLowerInvariant();
+            string val = m.Groups[2].Success ? m.Groups[2].Value : m.Groups[3].Value;
+            switch (key)
+            {
+                case "制造商":
+                case "manufacturer":
+                    modelReq.Manufacturer = val;
+                    break;
+                case "型号":
+                case "model":
+                    modelReq.Model = val;
+                    break;
+                case "年份":
+                case "year":
+                    modelReq.Year = val;
+                    break;
+                case "等级":
+                case "class":
+                    tuneReq.Class = val;
+                    break;
+                case "比赛类型":
+                case "matchtype":
+                    tuneReq.MatchType = val;
+                    break;
+                case "传动":
+                case "驱动":
+                case "驱动类型":
+                case "drivetrain":
+                    tuneReq.Drivetrain = val;
+                    break;
+                case "属性":
+                case "performancepreference":
+                    tuneReq.PerformancePreference = val;
+                    break;
+                case "胎面":
+                case "tire":
+                case "tirecompound":
+                    tuneReq.TireCompound = val;
+                    break;
+                case "干湿地":
+                case "适用干/湿":
+                case "surface":
+                case "surfacecondition":
+                    tuneReq.SurfaceCondition = val;
+                    break;
+                case "强度":
+                case "strength":
+                    tuneReq.Strength = val;
+                    break;
+                case "调校":
+                case "tuneraw":
+                case "tune":
+                    tuneReq.TuneRaw = val;
+                    break;
+                case "备注":
+                case "notes":
+                case "remarks":
+                    tuneReq.Remarks = val;
+                    break;
+                case "圈速":
+                case "laptime":
+                    tuneReq.LapTime = val;
                     break;
                 default:
                     error = $"未知参数：{key}";
