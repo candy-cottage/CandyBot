@@ -643,4 +643,73 @@ public class CandyBotServiceTests
         handled.Should().BeTrue();
         sender.TextContents.Single().Should().Contain("调校ID");
     }
+
+    // ---- Task 16：待更新调校表 / 已过时调校表 / 更新调校 路由与权限测试 -------------------
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_待更新调校表_非管理员被拒绝()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("待更新调校表");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue("处理器应消费该指令");
+        sender.TextContents.Should().ContainSingle().Which.Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_已过时调校表_非管理员被拒绝()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("已过时调校表");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue("处理器应消费该指令");
+        sender.TextContents.Should().ContainSingle().Which.Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_更新调校_非管理员被拒绝()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("更新调校 123");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue("处理器应消费该指令");
+        sender.TextContents.Should().ContainSingle().Which.Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_待更新调校表前缀_正确路由()
+    {
+        // 非管理员 → 被 CheckUser 拒绝，但证明处理器命中了该前缀
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("待更新调校表");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue("「待更新调校表」前缀应被正确路由");
+        sender.TextContents.Single().Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_已过时调校表前缀_正确路由()
+    {
+        // 非管理员 → 被 CheckUser 拒绝，但证明处理器命中了该前缀
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("已过时调校表");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue("「已过时调校表」前缀应被正确路由");
+        sender.TextContents.Single().Should().Be("你没有权限执行此操作。");
+    }
 }

@@ -1258,6 +1258,155 @@ namespace CandyCottage.CandyBot.Services
             return (true, "success", dt, totalPages);
         }
 
+        /// <summary>
+        /// 按 TuneId 查询单条缓存行（VehicleTuneCache），用于差异展示与更新前核查。
+        /// </summary>
+        public (bool success, DataRow? row) GetCacheTuneByTuneId(int tuneId)
+        {
+            sql.Parameters["@tid"] = tuneId;
+            DataRow? row = sql.ExecuteDataRow("SELECT * FROM VehicleTuneCache WHERE TuneId = @tid");
+            return (sql.Success && row != null, sql.Success ? row : null);
+        }
+
+        /// <summary>
+        /// 将缓存快照（VehicleTuneCache）应用到对应的 VehicleTunes 行，一次 MySQL 事务完成：
+        /// 1. FOR UPDATE 锁定缓存行；2. 覆写 live 行的源衍生展示字段；
+        /// 3. 清除 IsManual=0，TuneStatus='正常'，记录操作人；4. 删除缓存行；5. 提交。
+        ///
+        /// 前置：tuneId 在 VehicleTuneCache 中必须存在（且在 VehicleTunes 中有对应行）。
+        /// </summary>
+        /// <param name="tuneId">要应用缓存的调校 ID。</param>
+        /// <param name="actorUserId">操作人用户 ID，写入 LastUpdatedUserId。</param>
+        /// <param name="error">出错时的描述；成功时为 ""。</param>
+        /// <returns>成功时 true；缓存行不存在或 SQL 失败时 false。</returns>
+        public bool ApplyCachedTune(int tuneId, long actorUserId, out string error)
+        {
+            error = "";
+            try
+            {
+                sql.NewTransaction();
+
+                // 加行锁：缓存行不存在则失败
+                sql.Parameters["@tuneId"] = tuneId;
+                sql.ExecuteDataSetForUpdate("SELECT * FROM VehicleTuneCache WHERE TuneId = @tuneId");
+                if (!sql.Success || sql.DataSet is null || sql.DataSet.Tables.Count == 0
+                    || sql.DataSet.Tables[0].Rows.Count == 0)
+                {
+                    error = "未找到对应的缓存行，可能已被清除。";
+                    return false;
+                }
+
+                DataRow cache = sql.DataSet.Tables[0].Rows[0];
+
+                // 重新计算 Tuner（TuneRaw 可能已更新）
+                string tuneRaw = cache["TuneRaw"]?.ToString() ?? "";
+                string tuner = ForzaTuneIdentity.TunerKey(ForzaTuneIdentity.ParseTuners(tuneRaw));
+
+                // 应用缓存快照到 live 行：覆写源衍生展示字段，清除人手维护标记，重置状态
+                sql.Parameters["@class"] = cache["Class"] ?? (object)DBNull.Value;
+                sql.Parameters["@matchType"] = cache["MatchType"] ?? (object)DBNull.Value;
+                sql.Parameters["@drivetrain"] = cache["Drivetrain"] ?? (object)DBNull.Value;
+                sql.Parameters["@perfPref"] = cache["PerformancePreference"] ?? (object)DBNull.Value;
+                sql.Parameters["@tireCompound"] = cache["TireCompound"] ?? (object)DBNull.Value;
+                sql.Parameters["@surfCond"] = cache["SurfaceCondition"] ?? (object)DBNull.Value;
+                sql.Parameters["@strength"] = cache["Strength"] ?? (object)DBNull.Value;
+                sql.Parameters["@tuner"] = string.IsNullOrEmpty(tuner) ? (object)DBNull.Value : tuner;
+                sql.Parameters["@tuneRaw"] = cache["TuneRaw"] ?? (object)DBNull.Value;
+                sql.Parameters["@remarks"] = cache["Remarks"] ?? (object)DBNull.Value;
+                sql.Parameters["@lapTime"] = cache["LapTime"] ?? (object)DBNull.Value;
+                sql.Parameters["@extData"] = cache["ExtData"] ?? (object)DBNull.Value;
+                sql.Parameters["@sourceFingerprint"] = cache["SourceFingerprint"] ?? (object)DBNull.Value;
+                sql.Parameters["@actorUserId"] = actorUserId;
+                sql.Parameters["@id"] = tuneId;
+
+                sql.Execute(@"
+                    UPDATE VehicleTunes SET
+                        Class = @class,
+                        MatchType = @matchType,
+                        Drivetrain = @drivetrain,
+                        PerformancePreference = @perfPref,
+                        TireCompound = @tireCompound,
+                        SurfaceCondition = @surfCond,
+                        Strength = @strength,
+                        Tuner = @tuner,
+                        TuneRaw = @tuneRaw,
+                        Remarks = @remarks,
+                        LapTime = @lapTime,
+                        ExtData = @extData,
+                        SourceFingerprint = @sourceFingerprint,
+                        IsManual = 0,
+                        TuneStatus = '正常',
+                        LastUpdatedUserId = @actorUserId,
+                        LastUpdatedAt = NOW()
+                    WHERE Id = @id");
+
+                if (!sql.Success)
+                {
+                    error = "更新调校失败，请稍后重试。";
+                    return false;
+                }
+
+                // 删除缓存行
+                sql.Parameters["@delId"] = tuneId;
+                sql.Execute("DELETE FROM VehicleTuneCache WHERE TuneId = @delId");
+                if (!sql.Success)
+                {
+                    error = "清除缓存行失败，请稍后重试。";
+                    return false;
+                }
+
+                sql.Commit();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "ApplyCachedTune error: {Message}", ex.Message);
+                error = $"应用缓存异常：{ex.Message}";
+                return false;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
+        /// <summary>
+        /// 对比 live 调校行与缓存行的源衍生展示字段，逐字段输出变化行（字段：旧值 -&gt; 新值）。
+        /// 字段来自两张表同名列：Class、MatchType、Drivetrain、PerformancePreference、TireCompound、
+        /// SurfaceCondition、Strength、TuneRaw、Remarks、LapTime。
+        /// 若无任何变化则返回空串。
+        /// </summary>
+        /// <param name="liveRow">VehicleTunes 当前行（旧值来源）。</param>
+        /// <param name="cacheRow">VehicleTuneCache 缓存行（新值来源）。</param>
+        /// <returns>差异描述；无变化时为 ""。</returns>
+        internal static string RenderTuneDiff(DataRow liveRow, DataRow cacheRow)
+        {
+            // 中文标签 → 列名（同时存在于 VehicleTunes 与 VehicleTuneCache）
+            (string 标签, string 列名)[] fields =
+            [
+                ("等级", "Class"),
+                ("比赛类型", "MatchType"),
+                ("驱动", "Drivetrain"),
+                ("属性", "PerformancePreference"),
+                ("胎面", "TireCompound"),
+                ("干湿地", "SurfaceCondition"),
+                ("强度", "Strength"),
+                ("调校", "TuneRaw"),
+                ("备注", "Remarks"),
+                ("圈速", "LapTime"),
+            ];
+
+            StringBuilder sb = new();
+            foreach ((string 标签, string 列名) in fields)
+            {
+                string oldVal = liveRow[列名]?.ToString() ?? "";
+                string newVal = cacheRow[列名]?.ToString() ?? "";
+                if (oldVal != newVal)
+                    sb.AppendLine($"{标签}：{oldVal} -> {newVal}");
+            }
+            return sb.ToString();
+        }
+
         public class VehicleMatch
         {
             public int Id { get; set; }

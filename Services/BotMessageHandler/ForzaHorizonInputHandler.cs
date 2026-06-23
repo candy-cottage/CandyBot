@@ -916,6 +916,118 @@ public partial class CandyBotService
                 await botService.SendAsync(e, reply);
                 return true;
             }
+
+            // ========== 调校缓存管理（管理员） ==========
+
+            if (e.Detail.StartsWith("待更新调校表"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string pendingDetail = e.Detail["待更新调校表".Length..].Trim();
+                (_, int pendingPage) = SplitPageParam(pendingDetail);
+
+                var (pendingSuccess, pendingMsg, pendingData, pendingTotal) = forzaService.ListTunesByStatus("有更新", pendingPage);
+                reply.Keyboard = new KeyboardMessage();
+
+                if (!pendingSuccess || pendingData == null)
+                {
+                    md.Content = $"暂无「有更新」状态的调校。\r\n{pendingMsg}";
+                    reply.Keyboard.AppendButtons(2, ForzaNavButtons());
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                StringBuilder pendingSb = new();
+                pendingSb.AppendLine($"🔄 待更新调校表（第 {pendingPage}/{pendingTotal} 页）");
+                foreach (DataRow tuneRow in pendingData.Rows)
+                {
+                    int rowTuneId = Convert.ToInt32(tuneRow["Id"]);
+                    string rowClass = tuneRow["Class"]?.ToString() ?? "";
+                    string rowMatchType = tuneRow["MatchType"]?.ToString() ?? "";
+                    string rowDrivetrain = tuneRow["Drivetrain"]?.ToString() ?? "";
+                    pendingSb.AppendLine($"\r\n**ID: {rowTuneId} [{rowClass}/{rowMatchType}] {rowDrivetrain}**");
+
+                    var (cacheOk, cacheRow) = forzaService.GetCacheTuneByTuneId(rowTuneId);
+                    if (cacheOk && cacheRow != null)
+                    {
+                        string diff = ForzaService.RenderTuneDiff(tuneRow, cacheRow);
+                        pendingSb.AppendLine(string.IsNullOrEmpty(diff) ? "变化：（数据相同）" : $"变化：\r\n{diff.TrimEnd()}");
+                    }
+                    else
+                    {
+                        pendingSb.AppendLine("（未找到缓存行）");
+                    }
+
+                    reply.Keyboard.AppendButtons(1, Button.CreateCmdButton("🔄 更新", $"更新调校 {rowTuneId}", false));
+                }
+                md.Content = pendingSb.ToString();
+                if (pendingTotal > 1)
+                    reply.Keyboard.AddPaginationRow("待更新调校表 -p ", pendingPage, pendingTotal);
+                reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            if (e.Detail.StartsWith("已过时调校表"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string expiredDetail = e.Detail["已过时调校表".Length..].Trim();
+                (_, int expiredPage) = SplitPageParam(expiredDetail);
+
+                var (expiredSuccess, expiredMsg, expiredData, expiredTotal) = forzaService.ListTunesByStatus("已过时", expiredPage);
+                reply.Keyboard = new KeyboardMessage();
+
+                if (!expiredSuccess || expiredData == null)
+                {
+                    md.Content = $"暂无「已过时」状态的调校。\r\n{expiredMsg}";
+                    reply.Keyboard.AppendButtons(2, ForzaNavButtons());
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                StringBuilder expiredSb = new();
+                expiredSb.AppendLine($"🗑 已过时调校表（第 {expiredPage}/{expiredTotal} 页）");
+                foreach (DataRow tuneRow in expiredData.Rows)
+                {
+                    int rowTuneId = Convert.ToInt32(tuneRow["Id"]);
+                    string rowClass = tuneRow["Class"]?.ToString() ?? "";
+                    string rowMatchType = tuneRow["MatchType"]?.ToString() ?? "";
+                    string rowDrivetrain = tuneRow["Drivetrain"]?.ToString() ?? "";
+                    expiredSb.AppendLine($"\r\n**ID: {rowTuneId} [{rowClass}/{rowMatchType}] {rowDrivetrain}**");
+
+                    reply.Keyboard.AppendButtons(1, Button.CreateCmdButton("🗑 删除", $"删除调校 {rowTuneId}", false));
+                }
+                md.Content = expiredSb.ToString();
+                if (expiredTotal > 1)
+                    reply.Keyboard.AddPaginationRow("已过时调校表 -p ", expiredPage, expiredTotal);
+                reply.Keyboard.AppendButtonsWithNewRow(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            if (e.Detail.StartsWith("更新调校"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string applyStr = e.Detail["更新调校".Length..].Trim();
+                if (!int.TryParse(applyStr, out int applyTuneId))
+                {
+                    await botService.SendAsync(e, "格式：更新调校 <调校ID>\r\n示例：更新调校 123");
+                    return true;
+                }
+
+                bool applyOk = forzaService.ApplyCachedTune(applyTuneId, user!.Id, out string applyErr);
+                md.Content = applyOk
+                    ? "✅ 调校已从缓存更新，状态重置为正常。"
+                    : $"❌ 更新失败：{applyErr}";
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
         }
         catch (Exception ex)
         {
