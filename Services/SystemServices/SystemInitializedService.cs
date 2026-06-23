@@ -8,7 +8,7 @@ using Milimoe.FunGame.Core.Library.SQLScript.Common;
 
 namespace CandyCottage.CandyBot.Services.SystemServices
 {
-    public class SystemInitializedService(IServiceProvider serviceProvider, ITaskSchedulerManager taskManager, ForzaConfig forzaConfig) : IHostedService
+    public class SystemInitializedService(IServiceProvider serviceProvider, ITaskSchedulerManager taskManager, ForzaConfig forzaConfig, CandyBotFunctionConfig functionConfig) : IHostedService
     {
         public const string TaskName_0ClockSyncCar = "0点同步车辆";
         public const string TaskName_12ClockSyncCar = "12点同步车辆";
@@ -33,6 +33,12 @@ namespace CandyCottage.CandyBot.Services.SystemServices
 
         public async Task SyncForzaWithDocs()
         {
+            // 地平线模块关闭时跳过计划同步，与消息处理器保持一致
+            if (!functionConfig.ForzaHorizon)
+            {
+                return;
+            }
+
             using IServiceScope scope = serviceProvider.CreateScope();
             IBotReplySender botReplySender = scope.ServiceProvider.GetRequiredService<IBotReplySender>();
             PluginConfig initializationConfig = new("sqlconfig", "initialization");
