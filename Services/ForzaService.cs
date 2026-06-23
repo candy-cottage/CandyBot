@@ -1109,15 +1109,14 @@ namespace CandyCottage.CandyBot.Services
                 AddSetClause(setClauses, "LapTime", request.LapTime);
                 AddSetClause(setClauses, "Remarks", request.Remarks);
                 AddSetClause(setClauses, "ExtData", request.ExtData);
-                // TuneRaw + 派生的 Tuner 同步更新
+                // TuneRaw + 派生的 Tuner 同步更新；TuneRaw 未提供时两列均不写入，避免置空已有值
                 if (request.TuneRaw != null)
                 {
                     sql.Parameters["@TuneRaw"] = request.TuneRaw;
                     setClauses.Add("TuneRaw = @TuneRaw");
+                    sql.Parameters["@Tuner"] = string.IsNullOrEmpty(tuner) ? (object)DBNull.Value : tuner;
+                    setClauses.Add("Tuner = @Tuner");
                 }
-                // Tuner 总是从 TuneRaw 派生，与 request.TuneRaw 绑定
-                sql.Parameters["@Tuner"] = string.IsNullOrEmpty(tuner) ? (object)DBNull.Value : tuner;
-                setClauses.Add("Tuner = @Tuner");
 
                 // 固定更新的列
                 sql.Parameters["@TuneStatus"] = tuneStatus;

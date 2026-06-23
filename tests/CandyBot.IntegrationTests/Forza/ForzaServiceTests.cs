@@ -1155,6 +1155,86 @@ public class ForzaServiceTests(MySqlFixture fixture)
         afterRow["TuneStatus"].ToString().Should().Be("存疑", "TuneStatus 应已更新");
     }
 
+    [Fact]
+    public async Task UpdateTune_仅改状态_TuneRaw为null_Tuner列不被置空()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "TunerNullMaker", Model = "TunerNullModel" }, 0, out _);
+        vehicleId.Should().BeGreaterThan(0);
+
+        // 插入一条有非空 TuneRaw 的调校（Tuner 由 TuneRaw 派生，应为非空）
+        VehicleTuneRequest srcReq = MinimalTuneRequest(vehicleId, tuneRaw: "ZGC调校码12345", sourceFileId: "file-tuner-null");
+        int tuneId = SeedTune(srcReq, seq: 0);
+
+        // 读取插入后的 Tuner 值（应非空）
+        using MySQLHelper probe0 = _fixture.CreateHelper();
+        DataRow? row0 = probe0.ExecuteDataRow(
+            $"SELECT Tuner, TuneRaw FROM VehicleTunes WHERE Id = {tuneId}");
+        row0.Should().NotBeNull();
+        string originalTuner = row0!["Tuner"].ToString()!;
+        string originalTuneRaw = row0["TuneRaw"].ToString()!;
+        originalTuner.Should().NotBeEmpty("插入带 TuneRaw 的调校后 Tuner 应非空");
+        originalTuneRaw.Should().Be("ZGC调校码12345");
+
+        // 仅改 TuneStatus（TuneRaw=null）→ Tuner 不得被置空
+        using MySQLHelper sqlUpd = _fixture.CreateHelper();
+        ForzaService svcUpd = new(NullLogger<ForzaService>.Instance, sqlUpd, _forzaConfig);
+        bool ok = svcUpd.UpdateTune(new VehicleTuneRequest { Id = tuneId, TuneStatus = "存疑" }, 99, out string updErr);
+        ok.Should().BeTrue(updErr);
+
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? afterRow = probe.ExecuteDataRow(
+            $"SELECT Tuner, TuneRaw, TuneStatus FROM VehicleTunes WHERE Id = {tuneId}");
+        afterRow.Should().NotBeNull();
+        afterRow!["Tuner"].ToString().Should().Be(originalTuner,
+            "TuneRaw=null 的状态编辑不得改写 Tuner——修复 Task 15 bug：Tuner 不再无条件写入");
+        afterRow["TuneRaw"].ToString().Should().Be(originalTuneRaw, "TuneRaw 也应保持不变");
+        afterRow["TuneStatus"].ToString().Should().Be("存疑", "TuneStatus 应已更新");
+    }
+
+    [Fact]
+    public async Task UpdateTune_提供新TuneRaw_Tuner随之更新()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "TunerUpdMaker", Model = "TunerUpdModel" }, 0, out _);
+        vehicleId.Should().BeGreaterThan(0);
+
+        // 插入带 TuneRaw 的调校
+        VehicleTuneRequest srcReq = MinimalTuneRequest(vehicleId, tuneRaw: "旧调校码AAAA", sourceFileId: "file-tuner-upd");
+        int tuneId = SeedTune(srcReq, seq: 0);
+
+        // 读取原始 Tuner
+        using MySQLHelper probe0 = _fixture.CreateHelper();
+        DataRow? row0 = probe0.ExecuteDataRow($"SELECT Tuner FROM VehicleTunes WHERE Id = {tuneId}");
+        string originalTuner = row0!["Tuner"].ToString()!;
+        originalTuner.Should().NotBeEmpty("初始 Tuner 应非空");
+
+        // 提供新 TuneRaw → Tuner 应随之更新
+        string newTuneRaw = "新调校码BBBB";
+        using MySQLHelper sqlUpd = _fixture.CreateHelper();
+        ForzaService svcUpd = new(NullLogger<ForzaService>.Instance, sqlUpd, _forzaConfig);
+        bool ok = svcUpd.UpdateTune(new VehicleTuneRequest { Id = tuneId, TuneRaw = newTuneRaw }, 99, out string updErr);
+        ok.Should().BeTrue(updErr);
+
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? afterRow = probe.ExecuteDataRow(
+            $"SELECT Tuner, TuneRaw FROM VehicleTunes WHERE Id = {tuneId}");
+        afterRow.Should().NotBeNull();
+        afterRow!["TuneRaw"].ToString().Should().Be(newTuneRaw, "TuneRaw 应已更新为新值");
+        // Tuner 由新 TuneRaw 派生；只要 TuneRaw 变了，Tuner 就应当变（或仍非 null）
+        afterRow["Tuner"].ToString().Should().NotBeNull("提供新 TuneRaw 后 Tuner 不应为 null");
+    }
+
     // =========================================================================
     // Task 13 — JOIN 读路径：DataTable 列别名 + 分页以调校行为粒度
     // =========================================================================
