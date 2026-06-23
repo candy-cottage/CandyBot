@@ -48,6 +48,183 @@ namespace CandyCottage.CandyBot.Services
             return GetVehicleDataTable("WHERE Id = @id", 1, 1);
         }
 
+        // ==================== 车型 CRUD（Task 7：ModelKey 唯一，确定性返回 VehicleId） ====================
+
+        /// <summary>
+        /// 按 ModelKey upsert 车型，并通过回读确定性地返回 VehicleId（只增不删）。
+        ///
+        /// 不依赖 LastInsertId：INSERT...ON DUPLICATE KEY 在 MySQL 的实际 LAST_INSERT_ID 行为因
+        /// 版本和参数而异；回读 SELECT 总是正确。新行的 IsManual 由 actorUserId 决定：
+        /// actorUserId != 0 表示手动创建（IsManual=1），0 表示系统/自动同步（IsManual=0）。
+        /// 已存在的行不会被覆写 IsManual。
+        ///
+        /// 前置：Manufacturer/Model 不能为空；Year 为 null 或 "" 归一化后相同（不产生新行）。
+        /// </summary>
+        /// <param name="request">车型信息（Manufacturer、Model 必填，Year 可选）。</param>
+        /// <param name="actorUserId">操作人用户ID；0 表示系统/自动同步。</param>
+        /// <param name="error">出错时的描述；成功时为 ""。</param>
+        /// <returns>upsert 后 Vehicles.Id；出错时返回 0。</returns>
+        public int EnsureVehicleModel(VehicleModelRequest request, long actorUserId, out string error)
+        {
+            error = "";
+
+            // 校验必填字段
+            if (string.IsNullOrWhiteSpace(request.Manufacturer))
+            {
+                error = "制造商不能为空。";
+                return 0;
+            }
+            if (string.IsNullOrWhiteSpace(request.Model))
+            {
+                error = "型号不能为空。";
+                return 0;
+            }
+
+            string modelKey = ForzaTuneIdentity.BuildModelKey(request.Manufacturer, request.Model, request.Year);
+            int isManual = actorUserId != 0 ? 1 : 0;
+
+            try
+            {
+                sql.NewTransaction();
+
+                // ON DUPLICATE KEY 只更新 Id=LAST_INSERT_ID(Id) 使得行保持不变，并激活 LAST_INSERT_ID；
+                // 但回读 SELECT 更可靠，避免 MySQL 驱动/版本之间 LastInsertId 的歧义。
+                sql.Parameters["@manufacturer"] = request.Manufacturer;
+                sql.Parameters["@model"] = request.Model;
+                sql.Parameters["@year"] = request.Year ?? (object)DBNull.Value;
+                sql.Parameters["@modelKey"] = modelKey;
+                sql.Parameters["@isManual"] = isManual;
+                sql.Parameters["@userId"] = actorUserId;
+                sql.Execute(@"
+                    INSERT INTO Vehicles (Manufacturer, Model, Year, ModelKey, IsManual, LastUpdatedUserId)
+                    VALUES (@manufacturer, @model, @year, @modelKey, @isManual, @userId)
+                    ON DUPLICATE KEY UPDATE Id = LAST_INSERT_ID(Id)");
+
+                if (!sql.Success)
+                {
+                    error = "写入车型失败，请稍后重试。";
+                    return 0;
+                }
+
+                sql.Commit();
+
+                // 回读以确定性获取 VehicleId（不信任 LastInsertId）
+                sql.Parameters["@key"] = modelKey;
+                DataRow? row = sql.ExecuteDataRow("SELECT Id FROM Vehicles WHERE ModelKey = @key");
+                if (!sql.Success || row == null)
+                {
+                    error = "写入后回读车型失败。";
+                    return 0;
+                }
+
+                // 新制造商加入后使制造商缓存失效
+                forzaConfig.Invalidate();
+                return Convert.ToInt32(row["Id"]);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "EnsureVehicleModel error: {Message}", ex.Message);
+                error = $"车型 upsert 异常：{ex.Message}";
+                return 0;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
+        /// <summary>
+        /// 按主键查询单条车型记录，返回统一的 (success, message, DataTable?, totalPages) 形态。
+        /// totalPages 固定为 1（车型按主键精确匹配，不分页）。
+        /// </summary>
+        public (bool success, string message, DataTable? data, int totalPages) GetVehicleModelById(int id)
+        {
+            sql.Parameters["@id"] = id;
+            sql.ExecuteDataSet("SELECT * FROM Vehicles WHERE Id = @id");
+            if (!sql.Success || sql.DataSet is null || sql.DataSet.Tables.Count == 0
+                || sql.DataSet.Tables[0].Rows.Count == 0)
+                return (false, "未找到对应的车型。", null, 0);
+            return (true, "success", sql.DataSet.Tables[0], 1);
+        }
+
+        /// <summary>
+        /// 更新车型的 Manufacturer/Model/Year 并重新计算 ModelKey。
+        /// request.Id 为必填；Manufacturer 和 Model 不能更新为空。
+        /// LastUpdatedUserId 更新为 actorUserId。
+        /// </summary>
+        public bool UpdateVehicleModel(VehicleModelRequest request, long actorUserId, out string error)
+        {
+            error = "";
+
+            if (!request.Id.HasValue || request.Id.Value <= 0)
+            {
+                error = "请提供车型ID。";
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(request.Manufacturer))
+            {
+                error = "制造商不能为空。";
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(request.Model))
+            {
+                error = "型号不能为空。";
+                return false;
+            }
+
+            string modelKey = ForzaTuneIdentity.BuildModelKey(request.Manufacturer, request.Model, request.Year);
+
+            try
+            {
+                sql.NewTransaction();
+
+                // 确认记录存在（加行锁）
+                sql.Parameters["@id"] = request.Id.Value;
+                sql.ExecuteDataSetForUpdate("SELECT Id FROM Vehicles WHERE Id = @id");
+                if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
+                {
+                    error = "未找到对应的车型。";
+                    return false;
+                }
+
+                sql.Parameters["@manufacturer"] = request.Manufacturer;
+                sql.Parameters["@model"] = request.Model;
+                sql.Parameters["@year"] = request.Year ?? (object)DBNull.Value;
+                sql.Parameters["@modelKey"] = modelKey;
+                sql.Parameters["@userId"] = actorUserId;
+                sql.Parameters["@id"] = request.Id.Value;
+                sql.Execute(@"
+                    UPDATE Vehicles
+                    SET Manufacturer = @manufacturer,
+                        Model = @model,
+                        Year = @year,
+                        ModelKey = @modelKey,
+                        LastUpdatedUserId = @userId
+                    WHERE Id = @id");
+
+                if (!sql.Success)
+                {
+                    error = "更新车型失败。";
+                    return false;
+                }
+
+                sql.Commit();
+                // 制造商可能被改名，失效缓存
+                forzaConfig.Invalidate();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "UpdateVehicleModel error: {Message}", ex.Message);
+                error = $"更新车型异常：{ex.Message}";
+                return false;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
         public (bool success, string message, DataTable? data, int totalPages) GetVehicleInfoRaw(string vehicleName, int page)
         {
             if (string.IsNullOrWhiteSpace(vehicleName))

@@ -634,4 +634,98 @@ public class ForzaServiceTests(MySqlFixture fixture)
 
         result.Should().BeOfType<NotFoundObjectResult>("不存在的车辆应返回 404 Not Found");
     }
+
+    // =========================================================================
+    // Task 7 — EnsureVehicleModel / GetVehicleModelById / UpdateVehicleModel
+    // =========================================================================
+
+    /// <summary>创建最小合法 VehicleModelRequest，可按需覆写字段。</summary>
+    private static VehicleModelRequest MinimalVehicleModel(
+        string manufacturer = "TestMaker",
+        string model = "TestModel",
+        string? year = null) => new()
+        {
+            Manufacturer = manufacturer,
+            Model = model,
+            Year = year,
+        };
+
+    [Fact]
+    public async Task EnsureVehicleModel_同ModelKey调用两次_只建一行且返回同Id()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql1 = _fixture.CreateHelper();
+        ForzaService svc1 = new(NullLogger<ForzaService>.Instance, sql1, _forzaConfig);
+
+        VehicleModelRequest req = MinimalVehicleModel("Ferrari 法拉利", "FXX", "2022");
+        int id1 = svc1.EnsureVehicleModel(req, 0, out string err1);
+
+        err1.Should().BeEmpty("第一次 upsert 应成功");
+        id1.Should().BeGreaterThan(0);
+
+        // 第二次用不同的 helper 模拟不同调用方
+        using MySQLHelper sql2 = _fixture.CreateHelper();
+        ForzaService svc2 = new(NullLogger<ForzaService>.Instance, sql2, _forzaConfig);
+        int id2 = svc2.EnsureVehicleModel(req, 0, out string err2);
+
+        err2.Should().BeEmpty("第二次 upsert 应成功");
+        id2.Should().Be(id1, "同 ModelKey 第二次调用应返回同一 VehicleId");
+
+        // 直接验证 Vehicles 表中只有一行该 ModelKey
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? row = probe.ExecuteDataRow(
+            "SELECT COUNT(*) FROM Vehicles WHERE Manufacturer='Ferrari 法拉利' AND Model='FXX'");
+        Convert.ToInt32(row![0]).Should().Be(1, "同 ModelKey 两次 upsert 应只产生一行");
+    }
+
+    [Fact]
+    public async Task EnsureVehicleModel_Year为null与空串_视为同一车型()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 第一次：Year = null
+        using MySQLHelper sql1 = _fixture.CreateHelper();
+        ForzaService svc1 = new(NullLogger<ForzaService>.Instance, sql1, _forzaConfig);
+        int idNull = svc1.EnsureVehicleModel(MinimalVehicleModel("Honda", "Civic", null), 0, out string e1);
+        e1.Should().BeEmpty();
+        idNull.Should().BeGreaterThan(0);
+
+        // 第二次：Year = ""（空串）
+        using MySQLHelper sql2 = _fixture.CreateHelper();
+        ForzaService svc2 = new(NullLogger<ForzaService>.Instance, sql2, _forzaConfig);
+        int idEmpty = svc2.EnsureVehicleModel(MinimalVehicleModel("Honda", "Civic", ""), 0, out string e2);
+        e2.Should().BeEmpty();
+
+        idEmpty.Should().Be(idNull, "Year=null 与 Year=\"\" 归一化后相同，应命中同一行");
+
+        // 仅一行
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? row = probe.ExecuteDataRow(
+            "SELECT COUNT(*) FROM Vehicles WHERE Manufacturer='Honda' AND Model='Civic'");
+        Convert.ToInt32(row![0]).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task EnsureVehicleModel_返回的Id经GetVehicleModelById命中正确制造商()
+    {
+        await _fixture.ResetDataAsync();
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        int id = svc.EnsureVehicleModel(MinimalVehicleModel("Lamborghini", "Huracán"), 42, out string err);
+
+        err.Should().BeEmpty();
+        id.Should().BeGreaterThan(0);
+
+        // 用独立 probe 验证 GetVehicleModelById 返回正确行
+        using MySQLHelper probe = _fixture.CreateHelper();
+        ForzaService probeSvc = new(NullLogger<ForzaService>.Instance, probe, _forzaConfig);
+        var (success, message, data, _) = probeSvc.GetVehicleModelById(id);
+
+        success.Should().BeTrue(message);
+        data.Should().NotBeNull();
+        data!.Rows.Count.Should().Be(1);
+        data.Rows[0]["Manufacturer"].ToString().Should().Be("Lamborghini");
+        data.Rows[0]["Model"].ToString().Should().Be("Huracán");
+    }
 }
