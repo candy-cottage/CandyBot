@@ -29,14 +29,16 @@ public class CandyBotServiceTests
         IMemoryCache? memoryCache = null,
         SQLHelper sql = null!,
         BettingService bettingService = null!,
-        ITaskSchedulerExecutor taskSchedulerExecutor = null!) =>
+        ITaskSchedulerExecutor taskSchedulerExecutor = null!,
+        IBackgroundTaskQueue? taskQueue = null,
+        IForzaSheetImporter? forzaSheetImporter = null) =>
         new(
             NullLogger<CandyBotService>.Instance,
             memoryCache!,
             sql,
             functionConfig!,
             forzaConfig!,
-            taskQueue: null!,
+            taskQueue: taskQueue!,
             taskManager: null!,
             taskSchedulerExecutor,
             botService,
@@ -45,7 +47,8 @@ public class CandyBotServiceTests
             userService: null!,
             forzaService: null!,
             esportsSyncService: null!,
-            userAPITokenService: null!);
+            userAPITokenService: null!,
+            forzaSheetImporter: forzaSheetImporter!);
 
     private static MemoryCache NewCache() => new(new MemoryCacheOptions());
 
@@ -288,51 +291,56 @@ public class CandyBotServiceTests
         content.Should().NotContain("赛事列表");
     }
 
-    // ---- Handler: 同步车辆表（提交任务计划） ----------------------------
+    // ---- Handler: 同步车辆表（背景队列执行） ----------------------------
 
     [Fact]
-    public async Task HandleForzaHorizonInput_同步车辆表_管理员提交同步任务计划()
+    public async Task HandleForzaHorizonInput_同步车辆表_不再调用RunTaskNow_而是入队列并立即回复已提交()
     {
         RecordingBotReplySender sender = new();
         ITaskSchedulerExecutor executor = Substitute.For<ITaskSchedulerExecutor>();
-        executor.RunTaskNow(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(true);
-        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(), taskSchedulerExecutor: executor);
+        IBackgroundTaskQueue queue = Substitute.For<IBackgroundTaskQueue>();
+        IForzaSheetImporter importer = Substitute.For<IForzaSheetImporter>();
+
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(),
+            taskSchedulerExecutor: executor,
+            taskQueue: queue,
+            forzaSheetImporter: importer);
         C2CMessage e = TestData.CreateMessage("同步车辆表");
 
         bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
 
         handled.Should().BeTrue();
-        executor.Received(1).RunTaskNow(CandyCottage.CandyBot.Services.SystemServices.SystemInitializedService.TaskName_12ClockSyncCar, Arg.Any<CancellationToken>());
-        sender.TextContents.Single().Should().Contain("任务计划已提交");
+
+        // 核心断言：RunTaskNow 绝对不能被调用
+        executor.DidNotReceive().RunTaskNow(Arg.Any<string>(), Arg.Any<CancellationToken>());
+
+        // 后台队列必须入了一个任务
+        await queue.Received(1).QueueAsync(Arg.Any<Func<CancellationToken, Task>>());
+
+        // 立即回复"同步已提交"
+        sender.TextContents.Single().Should().Contain("同步已提交");
     }
 
     [Fact]
-    public async Task HandleForzaHorizonInput_同步车辆表_任务正在运行_回复提交失败()
+    public async Task HandleForzaHorizonInput_同步车辆表带表格ID_拒绝且不入队列()
     {
         RecordingBotReplySender sender = new();
         ITaskSchedulerExecutor executor = Substitute.For<ITaskSchedulerExecutor>();
-        executor.RunTaskNow(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(false);
-        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(), taskSchedulerExecutor: executor);
-        C2CMessage e = TestData.CreateMessage("同步车辆表");
+        IBackgroundTaskQueue queue = Substitute.For<IBackgroundTaskQueue>();
+        IForzaSheetImporter importer = Substitute.For<IForzaSheetImporter>();
 
-        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
-
-        handled.Should().BeTrue();
-        sender.TextContents.Single().Should().Contain("提交失败");
-    }
-
-    [Fact]
-    public async Task HandleForzaHorizonInput_同步车辆表带表格ID_拒绝并提示不再支持()
-    {
-        RecordingBotReplySender sender = new();
-        ITaskSchedulerExecutor executor = Substitute.For<ITaskSchedulerExecutor>();
-        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(), taskSchedulerExecutor: executor);
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets(),
+            taskSchedulerExecutor: executor,
+            taskQueue: queue,
+            forzaSheetImporter: importer);
         C2CMessage e = TestData.CreateMessage("同步车辆表 ABC123");
 
         bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
 
         handled.Should().BeTrue();
+        // 带参数时拒绝，既不入队也不调 RunTaskNow
         executor.DidNotReceive().RunTaskNow(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await queue.DidNotReceive().QueueAsync(Arg.Any<Func<CancellationToken, Task>>());
         sender.TextContents.Single().Should().Contain("不支持指定表格ID");
     }
 }

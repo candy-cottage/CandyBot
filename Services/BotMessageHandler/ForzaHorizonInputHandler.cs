@@ -45,14 +45,35 @@ public partial class CandyBotService
                     return true;
                 }
 
-                if (taskSchedulerExecutor.RunTaskNow(SystemServices.SystemInitializedService.TaskName_12ClockSyncCar))
+                // 捕获触发者信息（后台任务中 DI scope 已关闭，通过闭包传入）
+                long actorUserId = user?.Id ?? 0;
+                string actorOpenId = e.AuthorOpenId;
+                List<(string Label, string FileId)> targets = [.. forzaConfig.DocsID.Select(kv => (kv.Key, kv.Value))];
+
+                // 入后台队列：立即回复"已提交"，不阻塞消息处理线程
+                await taskQueue.QueueAsync(async _ =>
                 {
-                    await botService.SendAsync(e, "任务计划已提交，请等待结果！");
-                }
-                else
-                {
-                    await botService.SendAsync(e, "任务计划提交失败，可能原因：同步任务正在运行中，请稍后再试。");
-                }
+                    foreach ((string label, string fileId) in targets)
+                    {
+                        try
+                        {
+                            ForzaSheetSyncReport report = await forzaSheetImporter.SyncAsync(fileId, actorUserId);
+                            string summary = report.Success
+                                ? $"[{label}] 同步完成：新增 {report.InsertedTuneCount} 条调校，解析 {report.ParsedTuneCount} 行。"
+                                : $"[{label}] 同步失败：{report.ErrorMessage}";
+                            // 直接调用 SendActiveMessageAsync（此处已在队列任务中，不能再入队）
+                            await botService.SendActiveMessageAsync(actorOpenId, false, (BotReply)summary);
+                        }
+                        catch (Exception ex)
+                        {
+                            if (logger.IsEnabled(LogLevel.Error))
+                                logger.LogError(ex, "手动同步车辆表异常：{FileId}", fileId);
+                            await botService.SendActiveMessageAsync(actorOpenId, false, (BotReply)$"[{label}] 同步异常：{ex.Message}");
+                        }
+                    }
+                });
+
+                await botService.SendAsync(e, "同步已提交，完成后会通知你结果。");
                 return true;
             }
 
