@@ -728,4 +728,164 @@ public class ForzaServiceTests(MySqlFixture fixture)
         data.Rows[0]["Manufacturer"].ToString().Should().Be("Lamborghini");
         data.Rows[0]["Model"].ToString().Should().Be("Huracán");
     }
+    // =========================================================================
+    // Task 8 — InsertTune / UpdateTune / DeleteTunesByIds
+    // =========================================================================
+
+    /// <summary>
+    /// 构建最小合法 VehicleTuneRequest（含必填字段 Class 和 MatchType）。
+    /// 调用方需在外部先通过 EnsureVehicleModel 获得 VehicleId 并赋值。
+    /// </summary>
+    private static VehicleTuneRequest MinimalTuneRequest(
+        int vehicleId,
+        string cls = "S1",
+        string matchType = "Road",
+        string drivetrain = "AWD",
+        string tuneRaw = "TestTuner",
+        string? sourceFileId = null) => new()
+        {
+            VehicleId = vehicleId,
+            Class = cls,
+            MatchType = matchType,
+            Drivetrain = drivetrain,
+            TuneRaw = tuneRaw,
+            SourceFileId = sourceFileId,
+        };
+
+    /// <summary>
+    /// 在测试内插入一条调校，用独立 helper 以避免事务/参数状态纠缠。
+    /// 外层需要先 EnsureVehicleModel 获得 vehicleId。
+    /// </summary>
+    private int SeedTune(VehicleTuneRequest req, int seq = 0)
+    {
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        sql.NewTransaction();
+        int tuneId = svc.InsertTune(req, seq, out string err);
+        sql.Commit();
+        tuneId.Should().BeGreaterThan(0, err);
+        return tuneId;
+    }
+
+    [Fact]
+    public async Task UpdateTune_改驱动显示值_SourceIdentity与指纹均不变_状态回正常_清缓存行()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 先建车型
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(MinimalVehicleModel("TuneTestMaker", "TuneTestModel"), 0, out string modelErr);
+        modelErr.Should().BeEmpty();
+        vehicleId.Should().BeGreaterThan(0);
+
+        // 插入带来源信息的调校（有 SourceFileId → identity/fingerprint 非空）
+        VehicleTuneRequest insertReq = MinimalTuneRequest(vehicleId, drivetrain: "RWD", sourceFileId: "file-abc");
+        int tuneId = SeedTune(insertReq, seq: 0);
+
+        // 读取插入后的 SourceIdentity 和 SourceFingerprint（用于断言不变）
+        using MySQLHelper probe0 = _fixture.CreateHelper();
+        DataRow? row0 = probe0.ExecuteDataRow(
+            $"SELECT SourceIdentity, SourceFingerprint, TuneStatus FROM VehicleTunes WHERE Id = {tuneId}");
+        row0.Should().NotBeNull("调校应存在");
+        string originalIdentity = row0!["SourceIdentity"].ToString()!;
+        string originalFingerprint = row0["SourceFingerprint"].ToString()!;
+        originalIdentity.Should().NotBeEmpty("有 SourceFileId 时 SourceIdentity 应非空");
+        originalFingerprint.Should().NotBeEmpty("有 SourceFileId 时 SourceFingerprint 应非空");
+
+        // 在 VehicleTuneCache 插入一行（模拟已有待更新缓存），用原生 SQL
+        using MySQLHelper sqlCache = _fixture.CreateHelper();
+        sqlCache.Execute($@"
+            INSERT INTO VehicleTuneCache
+                (TuneId, VehicleId, Class, MatchType, SourceFileId, SourceIdentity)
+            VALUES
+                ({tuneId}, {vehicleId}, 'S1', 'Road', 'file-abc', 'dummy-identity')");
+        sqlCache.Success.Should().BeTrue("插入缓存行应成功");
+
+        // 调用 UpdateTune 改 Drivetrain（不传 TuneStatus，预期回写为"正常"）
+        using MySQLHelper sqlUpdate = _fixture.CreateHelper();
+        ForzaService svcUpdate = new(NullLogger<ForzaService>.Instance, sqlUpdate, _forzaConfig);
+        VehicleTuneRequest updateReq = new() { Id = tuneId, Drivetrain = "四驱" };
+        bool ok = svcUpdate.UpdateTune(updateReq, actorUserId: 42, out string updateErr);
+        ok.Should().BeTrue(updateErr);
+
+        // 探针：验证所有后置条件
+        using MySQLHelper probe = _fixture.CreateHelper();
+
+        // 1. SourceIdentity 未变
+        DataRow? afterRow = probe.ExecuteDataRow(
+            $"SELECT SourceIdentity, SourceFingerprint, TuneStatus, Drivetrain FROM VehicleTunes WHERE Id = {tuneId}");
+        afterRow.Should().NotBeNull();
+        afterRow!["SourceIdentity"].ToString().Should().Be(originalIdentity, "SourceIdentity 冻结，UpdateTune 不得修改");
+        afterRow["SourceFingerprint"].ToString().Should().Be(originalFingerprint, "SourceFingerprint 冻结，UpdateTune 不得修改");
+
+        // 2. Drivetrain 已更新
+        afterRow["Drivetrain"].ToString().Should().Be("四驱");
+
+        // 3. TuneStatus 回写为"正常"（未显式给状态）
+        afterRow["TuneStatus"].ToString().Should().Be("正常");
+
+        // 4. VehicleTuneCache 对应行已清除
+        DataRow? cacheRow = probe.ExecuteDataRow(
+            $"SELECT COUNT(*) FROM VehicleTuneCache WHERE TuneId = {tuneId}");
+        Convert.ToInt32(cacheRow![0]).Should().Be(0, "UpdateTune 后对应调校的缓存行应被清除");
+    }
+
+    [Fact]
+    public async Task DeleteTunesByIds_删除后查不到该调校()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(MinimalVehicleModel("DelTuneMaker", "DelTuneModel"), 0, out string modelErr);
+        modelErr.Should().BeEmpty();
+
+        // 插入调校
+        int tuneId = SeedTune(MinimalTuneRequest(vehicleId));
+
+        // 删除
+        using MySQLHelper sqlDel = _fixture.CreateHelper();
+        ForzaService svcDel = new(NullLogger<ForzaService>.Instance, sqlDel, _forzaConfig);
+        var (success, _, deletedCount) = svcDel.DeleteTunesByIds([tuneId]);
+        success.Should().BeTrue();
+        deletedCount.Should().Be(1);
+
+        // 验证已不存在
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? row = probe.ExecuteDataRow($"SELECT COUNT(*) FROM VehicleTunes WHERE Id = {tuneId}");
+        Convert.ToInt32(row![0]).Should().Be(0, "删除后 VehicleTunes 中不应存在该行");
+    }
+
+    [Fact]
+    public async Task InsertTune_手动创建无来源_SourceIdentity为空()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(MinimalVehicleModel("ManualMaker", "ManualModel"), 42, out string modelErr);
+        modelErr.Should().BeEmpty();
+
+        // InsertTune 不传 SourceFileId（手动路径）
+        VehicleTuneRequest req = MinimalTuneRequest(vehicleId, sourceFileId: null);
+        req.IsManual = true;
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        sql.NewTransaction();
+        int tuneId = svc.InsertTune(req, seq: 0, out string err);
+        sql.Commit();
+        tuneId.Should().BeGreaterThan(0, err);
+
+        // 验证 SourceIdentity 为空串
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? row = probe.ExecuteDataRow($"SELECT SourceIdentity, SourceFingerprint FROM VehicleTunes WHERE Id = {tuneId}");
+        row.Should().NotBeNull();
+        row!["SourceIdentity"].ToString().Should().BeEmpty("无来源时 SourceIdentity 应存为空串");
+        (row["SourceFingerprint"] == DBNull.Value || row["SourceFingerprint"].ToString() == "").Should().BeTrue("无来源时 SourceFingerprint 应为 NULL");
+    }
+
 }

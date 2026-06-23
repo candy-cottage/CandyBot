@@ -811,6 +811,302 @@ namespace CandyCottage.CandyBot.Services
             }
         }
 
+
+        // ==================== 调校 CRUD（Task 8：冻结 identity + 指纹 + 清缓存） ====================
+
+        /// <summary>
+        /// 插入一条调校记录，<b>不开启自身事务</b>——由调用方负责事务边界。
+        /// seq 为该来源同 identity 的 SourceIdentitySeq（调用方按需传入）。
+        ///
+        /// 同步路径（SourceFileId 非空）：写入 SourceIdentity / SourceFingerprint。
+        /// 手动路径（SourceFileId 为空）：SourceIdentity = ""，SourceFingerprint = NULL。
+        ///
+        /// 前置：request.VehicleId 必须由调用方先确定；Class/MatchType 为 NOT NULL，缺失即报错。
+        /// </summary>
+        /// <returns>新行的 TuneId；失败返回 0 并通过 error 输出错误描述。</returns>
+        internal int InsertTune(VehicleTuneRequest request, int seq, out string error)
+        {
+            error = "";
+
+            if (string.IsNullOrWhiteSpace(request.Class))
+            {
+                error = "等级（Class）不能为空。";
+                return 0;
+            }
+            if (string.IsNullOrWhiteSpace(request.MatchType))
+            {
+                error = "比赛类型（MatchType）不能为空。";
+                return 0;
+            }
+
+            try
+            {
+                string modelKey = ForzaTuneIdentity.BuildModelKey(request.Manufacturer, request.Model, request.Year);
+                string tuner = ForzaTuneIdentity.TunerKey(ForzaTuneIdentity.ParseTuners(request.TuneRaw));
+                string sourceIdentity;
+                string? sourceFingerprint;
+
+                bool hasSrc = !string.IsNullOrEmpty(request.SourceFileId);
+                if (hasSrc)
+                {
+                    sourceIdentity = ForzaTuneIdentity.BuildSourceIdentity(request, modelKey, request.SourceFileId!);
+                    sourceFingerprint = ForzaTuneIdentity.BuildFingerprint(request, modelKey);
+                }
+                else
+                {
+                    sourceIdentity = "";
+                    sourceFingerprint = null;
+                }
+
+                string tuneStatus = request.TuneStatus ?? "正常";
+                int isManual = request.IsManual ? 1 : 0;
+
+                sql.Parameters["@vehicleId"] = request.VehicleId ?? 0;
+                sql.Parameters["@class"] = request.Class;
+                sql.Parameters["@matchType"] = request.MatchType;
+                sql.Parameters["@drivetrain"] = request.Drivetrain ?? (object)DBNull.Value;
+                sql.Parameters["@perfPref"] = request.PerformancePreference ?? (object)DBNull.Value;
+                sql.Parameters["@tireCompound"] = request.TireCompound ?? (object)DBNull.Value;
+                sql.Parameters["@surfCond"] = request.SurfaceCondition ?? (object)DBNull.Value;
+                sql.Parameters["@strength"] = request.Strength ?? (object)DBNull.Value;
+                sql.Parameters["@tuner"] = string.IsNullOrEmpty(tuner) ? (object)DBNull.Value : tuner;
+                sql.Parameters["@tuneRaw"] = request.TuneRaw ?? (object)DBNull.Value;
+                sql.Parameters["@remarks"] = request.Remarks ?? (object)DBNull.Value;
+                sql.Parameters["@lapTime"] = request.LapTime ?? (object)DBNull.Value;
+                sql.Parameters["@extData"] = request.ExtData ?? (object)DBNull.Value;
+                sql.Parameters["@sourceFileId"] = request.SourceFileId ?? "";
+                sql.Parameters["@sourceSheet"] = request.SourceSheet ?? (object)DBNull.Value;
+                sql.Parameters["@sourceRow"] = request.SourceRow.HasValue ? request.SourceRow.Value : (object)DBNull.Value;
+                sql.Parameters["@sourceDisplayName"] = request.SourceDisplayName ?? (object)DBNull.Value;
+                sql.Parameters["@sourceIdentity"] = sourceIdentity;
+                sql.Parameters["@sourceIdentitySeq"] = seq;
+                sql.Parameters["@sourceFingerprint"] = sourceFingerprint ?? (object)DBNull.Value;
+                sql.Parameters["@isManual"] = isManual;
+                sql.Parameters["@tuneStatus"] = tuneStatus;
+                sql.Parameters["@userId"] = request.LastUpdatedUserId;
+
+                sql.Execute(@"
+                    INSERT INTO VehicleTunes
+                        (VehicleId, Class, MatchType, Drivetrain, PerformancePreference,
+                         TireCompound, SurfaceCondition, Strength, Tuner, TuneRaw,
+                         Remarks, LapTime, ExtData,
+                         SourceFileId, SourceSheet, SourceRow, SourceDisplayName,
+                         SourceIdentity, SourceIdentitySeq, SourceFingerprint,
+                         IsManual, TuneStatus, LastUpdatedUserId)
+                    VALUES
+                        (@vehicleId, @class, @matchType, @drivetrain, @perfPref,
+                         @tireCompound, @surfCond, @strength, @tuner, @tuneRaw,
+                         @remarks, @lapTime, @extData,
+                         @sourceFileId, @sourceSheet, @sourceRow, @sourceDisplayName,
+                         @sourceIdentity, @sourceIdentitySeq, @sourceFingerprint,
+                         @isManual, @tuneStatus, @userId)");
+
+                if (!sql.Success)
+                {
+                    error = "插入调校失败，请稍后重试。";
+                    return 0;
+                }
+
+                return (int)sql.LastInsertId;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "InsertTune error: {Message}", ex.Message);
+                error = $"插入调校异常：{ex.Message}";
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 管理员编辑调校显示值：更新可编辑列（Class、MatchType、Drivetrain、PerformancePreference、
+        /// TireCompound、SurfaceCondition、Strength、TuneRaw、Remarks、LapTime、ExtData），
+        /// <b>冻结</b> SourceIdentity 与 SourceFingerprint（不出现在 SET 列表中）。
+        /// 未显式给 TuneStatus 时，回写为"正常"。
+        /// 更新后清除该调校的 VehicleTuneCache 行。
+        /// </summary>
+        public bool UpdateTune(VehicleTuneRequest request, long actorUserId, out string error)
+        {
+            error = "";
+
+            if (!request.Id.HasValue || request.Id.Value <= 0)
+            {
+                error = "请提供调校ID。";
+                return false;
+            }
+
+            try
+            {
+                sql.NewTransaction();
+
+                // 确认记录存在（加行锁）
+                sql.Parameters["@id"] = request.Id.Value;
+                sql.ExecuteDataSetForUpdate("SELECT Id FROM VehicleTunes WHERE Id = @id");
+                if (!sql.Success || sql.DataSet is null || sql.DataSet.Tables.Count == 0
+                    || sql.DataSet.Tables[0].Rows.Count == 0)
+                {
+                    error = "未找到对应的调校记录。";
+                    return false;
+                }
+
+                // 重新计算 Tuner
+                string tuner = ForzaTuneIdentity.TunerKey(ForzaTuneIdentity.ParseTuners(request.TuneRaw));
+                string tuneStatus = string.IsNullOrEmpty(request.TuneStatus) ? "正常" : request.TuneStatus;
+
+                List<string> setClauses = [];
+                // 可编辑列（不含 SourceIdentity / SourceFingerprint）
+                AddSetClause(setClauses, "Class", request.Class);
+                AddSetClause(setClauses, "MatchType", request.MatchType);
+                AddSetClause(setClauses, "Drivetrain", request.Drivetrain);
+                AddSetClause(setClauses, "PerformancePreference", request.PerformancePreference);
+                AddSetClause(setClauses, "TireCompound", request.TireCompound);
+                AddSetClause(setClauses, "SurfaceCondition", request.SurfaceCondition);
+                AddSetClause(setClauses, "Strength", request.Strength);
+                AddSetClause(setClauses, "LapTime", request.LapTime);
+                AddSetClause(setClauses, "Remarks", request.Remarks);
+                AddSetClause(setClauses, "ExtData", request.ExtData);
+                // TuneRaw + 派生的 Tuner 同步更新
+                if (request.TuneRaw != null)
+                {
+                    sql.Parameters["@TuneRaw"] = request.TuneRaw;
+                    setClauses.Add("TuneRaw = @TuneRaw");
+                }
+                // Tuner 总是从 TuneRaw 派生，与 request.TuneRaw 绑定
+                sql.Parameters["@Tuner"] = string.IsNullOrEmpty(tuner) ? (object)DBNull.Value : tuner;
+                setClauses.Add("Tuner = @Tuner");
+
+                // 固定更新的列
+                sql.Parameters["@TuneStatus"] = tuneStatus;
+                sql.Parameters["@LastUpdatedUserId"] = actorUserId;
+                sql.Parameters["@LastUpdatedAt"] = DateTime.UtcNow;
+                setClauses.Add("TuneStatus = @TuneStatus");
+                setClauses.Add("LastUpdatedUserId = @LastUpdatedUserId");
+                setClauses.Add("LastUpdatedAt = @LastUpdatedAt");
+
+                sql.Parameters["@id"] = request.Id.Value;
+                sql.Execute($"UPDATE VehicleTunes SET {string.Join(", ", setClauses)} WHERE Id = @id");
+                if (!sql.Success)
+                {
+                    error = "更新调校失败。";
+                    return false;
+                }
+
+                // 清除该调校的缓存行
+                sql.Parameters["@cacheId"] = request.Id.Value;
+                sql.Execute("DELETE FROM VehicleTuneCache WHERE TuneId = @cacheId");
+                // 缓存删除失败不影响主更新成功状态，仅记录日志
+                if (!sql.Success)
+                    logger.LogWarning("UpdateTune: 清除 VehicleTuneCache 行失败，TuneId={Id}", request.Id.Value);
+
+                sql.Commit();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "UpdateTune error: {Message}", ex.Message);
+                error = $"更新调校异常：{ex.Message}";
+                return false;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
+        /// <summary>
+        /// 按主键列表批量删除调校记录，同时清除对应的 VehicleTuneCache 行。
+        /// 返回 (success, message, deletedCount)；deletedCount 为 VehicleTunes 的实际影响行数。
+        /// </summary>
+        public (bool success, string message, int deletedCount) DeleteTunesByIds(List<int> ids)
+        {
+            if (ids == null || ids.Count == 0)
+                return (false, "未提供有效的调校ID", 0);
+
+            try
+            {
+                sql.NewTransaction();
+
+                string inClause = string.Join(",", ids.Select((_, i) => $"@id{i}"));
+                for (int i = 0; i < ids.Count; i++)
+                    sql.Parameters[$"@id{i}"] = ids[i];
+
+                // 先删缓存（参数复用，ClearParametersAfterExecute 默认 true，所以缓存删除用独立参数）
+                string cacheInClause = string.Join(",", ids.Select((_, i) => $"@cid{i}"));
+                for (int i = 0; i < ids.Count; i++)
+                    sql.Parameters[$"@cid{i}"] = ids[i];
+
+                sql.ClearParametersAfterExecute = false;
+                sql.Execute($"DELETE FROM VehicleTuneCache WHERE TuneId IN ({cacheInClause})");
+                sql.ClearParametersAfterExecute = true;
+
+                // 再删主表
+                sql.Execute($"DELETE FROM VehicleTunes WHERE Id IN ({inClause})");
+                if (!sql.Success)
+                    return (false, "删除调校失败，请稍后重试", 0);
+
+                int deleted = sql.AffectedRows;
+                sql.Commit();
+                return (true, $"成功删除 {deleted} 条调校", deleted);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "DeleteTunesByIds error");
+                return (false, $"删除异常：{ex.Message}", 0);
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
+        /// <summary>
+        /// 按车型 ID 查询该车型下的所有调校记录，按 Id 升序返回，不分页。
+        /// 返回形态与 GetVehicleModelById 一致：(success, message, DataTable?, totalPages)；
+        /// totalPages 固定为 1（车型精确匹配，无需分页）。
+        /// </summary>
+        public (bool success, string message, DataTable? data, int totalPages) GetTunesByVehicleId(int vehicleId)
+        {
+            sql.Parameters["@vid"] = vehicleId;
+            sql.ExecuteDataSet("SELECT * FROM VehicleTunes WHERE VehicleId = @vid ORDER BY Id");
+            if (!sql.Success || sql.DataSet is null || sql.DataSet.Tables.Count == 0
+                || sql.DataSet.Tables[0].Rows.Count == 0)
+                return (false, "未找到该车型的调校记录。", null, 0);
+            return (true, "success", sql.DataSet.Tables[0], 1);
+        }
+
+        /// <summary>
+        /// 按状态分页查询调校记录（镜像 GetVehicleDataTable 的分页风格）。
+        /// status 对应 TuneStatus 列（如"正常"/"存疑"/"弃用"）。
+        /// </summary>
+        public (bool success, string message, DataTable? data, int totalPages) ListTunesByStatus(string status, int page, int pageSize = 12)
+        {
+            if (page < 1) page = 1;
+            int offset = (page - 1) * pageSize;
+
+            sql.Parameters["@status"] = status;
+
+            // 参数传不过去 COUNT 查询（ClearParametersAfterExecute 默认 true），临时关闭
+            sql.ClearParametersAfterExecute = false;
+            sql.ExecuteDataSet($@"
+                SELECT * FROM VehicleTunes
+                WHERE TuneStatus = @status
+                ORDER BY Id
+                LIMIT {offset}, {pageSize}");
+            sql.ClearParametersAfterExecute = true;
+
+            if (sql.DataSet is null || sql.DataSet.Tables.Count == 0 || sql.DataSet.Tables[0].Rows.Count == 0)
+                return (false, "未找到符合条件的调校记录。", null, 0);
+
+            DataTable dt = sql.DataSet.Tables[0];
+
+            DataRow? countRow = sql.ExecuteDataRow("SELECT COUNT(*) FROM VehicleTunes WHERE TuneStatus = @status");
+            int totalCount = 0;
+            if (sql.Success && countRow != null)
+                _ = int.TryParse(countRow[0].ToString(), out totalCount);
+
+            int totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+            return (true, "success", dt, totalPages);
+        }
+
         public class VehicleMatch
         {
             public int Id { get; set; }
