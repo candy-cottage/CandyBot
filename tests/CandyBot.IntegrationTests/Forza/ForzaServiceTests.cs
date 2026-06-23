@@ -964,7 +964,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         errA.Should().BeEmpty();
 
         for (int i = 0; i < 8; i++)
-            SeedTune(new VehicleTuneRequest { VehicleId = vidA, Class = "A", MatchType = "公路", Drivetrain = "前驱", TuneRaw = $"tune-A-{i}" });
+            SeedTune(new VehicleTuneRequest { VehicleId = vidA, Class = "A", MatchType = "公路", Drivetrain = "前驱", TuneRaw = $"tune-A-{i}", SourceFileId = "seed-pgA" });
 
         // 车型 B：8 条调校
         using MySQLHelper sqlB = _fixture.CreateHelper();
@@ -975,7 +975,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         errB.Should().BeEmpty();
 
         for (int i = 0; i < 8; i++)
-            SeedTune(new VehicleTuneRequest { VehicleId = vidB, Class = "A", MatchType = "公路", Drivetrain = "前驱", TuneRaw = $"tune-B-{i}" });
+            SeedTune(new VehicleTuneRequest { VehicleId = vidB, Class = "A", MatchType = "公路", Drivetrain = "前驱", TuneRaw = $"tune-B-{i}", SourceFileId = "seed-pgB" });
 
         // 搜索 "PageMaker"，总共 16 条调校
         using MySQLHelper sqlQ = _fixture.CreateHelper();
