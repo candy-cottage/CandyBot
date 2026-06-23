@@ -1003,6 +1003,162 @@ public class ForzaServiceTests(MySqlFixture fixture)
     /// 建立一辆车型 + 一条调校，验证查询结果的 DataTable 列名是旧别名
     /// （Attribute 而非 PerformancePreference，Tune 而非 TuneRaw）——渲染器依赖旧列名。
     /// </summary>
+    // =========================================================================
+    // Task 15 — DeleteVehicleModelsByIds（FK CASCADE）
+    // =========================================================================
+
+    [Fact]
+    public async Task DeleteVehicleModelsByIds_连带删除其全部调校_CASCADE()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "CascadeMaker", Model = "CascadeModel" },
+            0, out string modelErr);
+        modelErr.Should().BeEmpty();
+        vehicleId.Should().BeGreaterThan(0);
+
+        // 插入 2 条调校（一条 IsManual=0，另一条手动新增 IsManual=1）
+        VehicleTuneRequest autoReq = MinimalTuneRequest(vehicleId, cls: "A", matchType: "Road", drivetrain: "AWD", tuneRaw: "auto-tune", sourceFileId: "file-cascade");
+        int tuneId1 = SeedTune(autoReq, seq: 0);
+
+        using MySQLHelper sqlAdd = _fixture.CreateHelper();
+        ForzaService svcAdd = new(NullLogger<ForzaService>.Instance, sqlAdd, _forzaConfig);
+        VehicleTuneRequest manualReq = new()
+        {
+            VehicleId = vehicleId,
+            Class = "S1",
+            MatchType = "Road",
+            Drivetrain = "RWD",
+        };
+        int tuneId2 = svcAdd.AddTune(manualReq, 42, out string addErr);
+        addErr.Should().BeEmpty();
+        tuneId2.Should().BeGreaterThan(0);
+
+        // 直接验证两条调校存在
+        using MySQLHelper probeInit = _fixture.CreateHelper();
+        DataRow? initCount = probeInit.ExecuteDataRow(
+            $"SELECT COUNT(*) FROM VehicleTunes WHERE VehicleId = {vehicleId}");
+        Convert.ToInt32(initCount![0]).Should().Be(2, "前置：应存在 2 条调校");
+
+        // 删除车型（触发 CASCADE）
+        using MySQLHelper sqlDel = _fixture.CreateHelper();
+        ForzaService svcDel = new(NullLogger<ForzaService>.Instance, sqlDel, _forzaConfig);
+        var (success, _, deletedCount) = svcDel.DeleteVehicleModelsByIds([vehicleId]);
+        success.Should().BeTrue();
+        deletedCount.Should().Be(1, "应删除 1 个车型行");
+
+        // InnoDB FK CASCADE 必须已删除全部关联调校
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? tuneCount = probe.ExecuteDataRow(
+            $"SELECT COUNT(*) FROM VehicleTunes WHERE VehicleId = {vehicleId}");
+        Convert.ToInt32(tuneCount![0]).Should().Be(0, "删除车型后 InnoDB FK CASCADE 应级联删除全部调校");
+
+        // Vehicles 行也应消失
+        DataRow? vRow = probe.ExecuteDataRow(
+            $"SELECT COUNT(*) FROM Vehicles WHERE Id = {vehicleId}");
+        Convert.ToInt32(vRow![0]).Should().Be(0, "Vehicles 行应已删除");
+    }
+
+    [Fact]
+    public async Task DeleteVehicleModelsByIds_空列表返回false()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+
+        var (success, message, _) = svc.DeleteVehicleModelsByIds([]);
+
+        success.Should().BeFalse();
+        message.Should().Be("未提供有效的车型ID");
+    }
+
+    // =========================================================================
+    // Task 15 — UpdateTune 决策15：改显示字段 → IsManual=1；仅改状态 → 不置位
+    // =========================================================================
+
+    [Fact]
+    public async Task UpdateTune_改显示字段_置IsManual为1_且冻结SourceIdentity与指纹()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型 + 带来源的调校（IsManual=0）
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "IsManualMaker", Model = "IsManualModel" }, 0, out _);
+        vehicleId.Should().BeGreaterThan(0);
+
+        VehicleTuneRequest srcReq = MinimalTuneRequest(vehicleId, drivetrain: "RWD", sourceFileId: "file-ismanual");
+        int tuneId = SeedTune(srcReq, seq: 0);
+
+        // 读取插入后的初始值
+        using MySQLHelper probe0 = _fixture.CreateHelper();
+        DataRow? row0 = probe0.ExecuteDataRow(
+            $"SELECT IsManual, SourceIdentity, SourceFingerprint FROM VehicleTunes WHERE Id = {tuneId}");
+        row0.Should().NotBeNull();
+        Convert.ToInt32(row0!["IsManual"]).Should().Be(0, "初始来源调校 IsManual 应为 0");
+        string originalIdentity = row0["SourceIdentity"].ToString()!;
+        string originalFingerprint = row0["SourceFingerprint"].ToString()!;
+        originalIdentity.Should().NotBeEmpty("有 SourceFileId 时 SourceIdentity 应非空");
+
+        // 编辑一个显示字段（Drivetrain）→ 应置位 IsManual=1，并冻结 identity/指纹
+        using MySQLHelper sqlUpd = _fixture.CreateHelper();
+        ForzaService svcUpd = new(NullLogger<ForzaService>.Instance, sqlUpd, _forzaConfig);
+        bool ok = svcUpd.UpdateTune(new VehicleTuneRequest { Id = tuneId, Drivetrain = "四驱" }, 99, out string updErr);
+        ok.Should().BeTrue(updErr);
+
+        // 验证
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? afterRow = probe.ExecuteDataRow(
+            $"SELECT IsManual, SourceIdentity, SourceFingerprint, Drivetrain FROM VehicleTunes WHERE Id = {tuneId}");
+        afterRow.Should().NotBeNull();
+        Convert.ToInt32(afterRow!["IsManual"]).Should().Be(1, "改显示字段后 IsManual 应被置为 1");
+        afterRow["SourceIdentity"].ToString().Should().Be(originalIdentity, "SourceIdentity 不得被修改（决策15冻结）");
+        afterRow["SourceFingerprint"].ToString().Should().Be(originalFingerprint, "SourceFingerprint 不得被修改（决策15冻结）");
+        afterRow["Drivetrain"].ToString().Should().Be("四驱");
+    }
+
+    [Fact]
+    public async Task UpdateTune_仅改状态_不置IsManual()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型 + 带来源的调校（IsManual=0）
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "StatusOnlyMaker", Model = "StatusOnlyModel" }, 0, out _);
+        vehicleId.Should().BeGreaterThan(0);
+
+        VehicleTuneRequest srcReq = MinimalTuneRequest(vehicleId, drivetrain: "FWD", sourceFileId: "file-statusonly");
+        int tuneId = SeedTune(srcReq, seq: 0);
+
+        // 确认初始 IsManual=0
+        using MySQLHelper probe0 = _fixture.CreateHelper();
+        DataRow? row0 = probe0.ExecuteDataRow($"SELECT IsManual FROM VehicleTunes WHERE Id = {tuneId}");
+        Convert.ToInt32(row0!["IsManual"]).Should().Be(0, "初始 IsManual 应为 0");
+
+        // 仅改 TuneStatus（不传任何显示字段）→ 不应置位 IsManual
+        using MySQLHelper sqlUpd = _fixture.CreateHelper();
+        ForzaService svcUpd = new(NullLogger<ForzaService>.Instance, sqlUpd, _forzaConfig);
+        bool ok = svcUpd.UpdateTune(new VehicleTuneRequest { Id = tuneId, TuneStatus = "存疑" }, 99, out string updErr);
+        ok.Should().BeTrue(updErr);
+
+        using MySQLHelper probe = _fixture.CreateHelper();
+        DataRow? afterRow = probe.ExecuteDataRow($"SELECT IsManual, TuneStatus FROM VehicleTunes WHERE Id = {tuneId}");
+        afterRow.Should().NotBeNull();
+        Convert.ToInt32(afterRow!["IsManual"]).Should().Be(0, "仅改状态时不应置位 IsManual（决策15）");
+        afterRow["TuneStatus"].ToString().Should().Be("存疑", "TuneStatus 应已更新");
+    }
+
+    // =========================================================================
+    // Task 13 — JOIN 读路径：DataTable 列别名 + 分页以调校行为粒度
+    // =========================================================================
+
     [Fact]
     public async Task GetVehicleInfoRaw_JOIN查询_DataTable列名为旧别名Attribute和Tune()
     {

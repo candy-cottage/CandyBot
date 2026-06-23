@@ -725,6 +725,46 @@ namespace CandyCottage.CandyBot.Services
             }
         }
 
+        /// <summary>
+        /// 按车型主键批量删除 Vehicles 行。FK（fk_tune_vehicle ON DELETE CASCADE）负责级联删除对应
+        /// 的 VehicleTunes 和 VehicleTuneCache 行，无需在应用层手工删除。
+        /// 返回 (success, message, deletedCount)；deletedCount 为 Vehicles 的实际影响行数。
+        /// </summary>
+        public (bool success, string message, int deletedCount) DeleteVehicleModelsByIds(List<int> ids)
+        {
+            if (ids == null || ids.Count == 0)
+                return (false, "未提供有效的车型ID", 0);
+
+            try
+            {
+                sql.NewTransaction();
+                string inClause = string.Join(",", ids.Select((_, i) => $"@id{i}"));
+                for (int i = 0; i < ids.Count; i++)
+                    sql.Parameters[$"@id{i}"] = ids[i];
+
+                // FK ON DELETE CASCADE 自动级联删除 VehicleTunes / VehicleTuneCache
+                string query = $"DELETE FROM Vehicles WHERE Id IN ({inClause})";
+                sql.Execute(query);
+                if (!sql.Success)
+                    return (false, "删除车型失败，请稍后重试", 0);
+
+                int deleted = sql.AffectedRows;
+                sql.Commit();
+                // 制造商可能因此完全消失，失效缓存
+                forzaConfig.Invalidate();
+                return (true, $"成功删除 {deleted} 个车型（含全部关联调校）", deleted);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "DeleteVehicleModelsByIds error");
+                return (false, $"删除车型异常：{ex.Message}", 0);
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
         public (bool success, string message, List<VehicleMatch>? matches) FindVehiclesByCriteria(VehicleRequest request)
         {
             List<VehicleMatch> matches = [];
@@ -1042,6 +1082,21 @@ namespace CandyCottage.CandyBot.Services
                 string tuner = ForzaTuneIdentity.TunerKey(ForzaTuneIdentity.ParseTuners(request.TuneRaw));
                 string tuneStatus = string.IsNullOrEmpty(request.TuneStatus) ? "正常" : request.TuneStatus;
 
+                // 决策15：编辑显示字段时置位 IsManual=1（让后续同步走缓存路径）；
+                // 仅改调校状态（TuneStatus）不置位——避免状态调整误标记来源调校为人手维护。
+                bool changesDisplayField =
+                    request.Class != null ||
+                    request.MatchType != null ||
+                    request.Drivetrain != null ||
+                    request.PerformancePreference != null ||
+                    request.TireCompound != null ||
+                    request.SurfaceCondition != null ||
+                    request.Strength != null ||
+                    request.TuneRaw != null ||
+                    request.Remarks != null ||
+                    request.LapTime != null ||
+                    request.ExtData != null;
+
                 List<string> setClauses = [];
                 // 可编辑列（不含 SourceIdentity / SourceFingerprint）
                 AddSetClause(setClauses, "Class", request.Class);
@@ -1071,6 +1126,13 @@ namespace CandyCottage.CandyBot.Services
                 setClauses.Add("TuneStatus = @TuneStatus");
                 setClauses.Add("LastUpdatedUserId = @LastUpdatedUserId");
                 setClauses.Add("LastUpdatedAt = @LastUpdatedAt");
+
+                // 决策15：只改显示字段时才置位 IsManual
+                if (changesDisplayField)
+                {
+                    sql.Parameters["@IsManual"] = 1;
+                    setClauses.Add("IsManual = @IsManual");
+                }
 
                 sql.Parameters["@id"] = request.Id.Value;
                 sql.Execute($"UPDATE VehicleTunes SET {string.Join(", ", setClauses)} WHERE Id = @id");

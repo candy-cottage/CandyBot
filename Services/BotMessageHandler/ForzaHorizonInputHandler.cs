@@ -251,53 +251,138 @@ public partial class CandyBotService
                 return true;
             }
 
+            // 修改车型：按 VehicleId 更新 Vehicles 行的制造商/型号/年份
+            // 必须在 修改车辆 之前匹配，防止前缀被截断
+            if (e.Detail.StartsWith("修改车型"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["修改车型".Length..].Trim();
+                string[] parts = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 1 || !int.TryParse(parts[0], out int modelId))
+                {
+                    await botService.SendAsync(e,
+                        "格式：修改车型 <车型ID> 制造商=xxx 型号=xxx [年份=yyyy]\r\n" +
+                        "示例：修改车型 5 制造商=法拉利 型号=F40 年份=1992");
+                    return true;
+                }
+
+                VehicleModelRequest modelReq = new() { Id = modelId };
+                string modelRemaining = string.Join(" ", parts[1..]);
+                if (!ParseModelKeyValuePairs(modelRemaining, modelReq, out string modelParseErr))
+                {
+                    await botService.SendAsync(e, modelParseErr);
+                    return true;
+                }
+
+                if (string.IsNullOrWhiteSpace(modelReq.Manufacturer) || string.IsNullOrWhiteSpace(modelReq.Model))
+                {
+                    md.Content = "缺少必填字段：制造商、型号都必须提供。";
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(1, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                if (!forzaService.UpdateVehicleModel(modelReq, user!.Id, out string modelUpdErr))
+                {
+                    md.Content = $"❌ 修改车型失败：{modelUpdErr}";
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                md.Content = "✅ 车型信息修改成功。";
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            // 修改车辆（兼容别名）→ 实际委托给「修改调校」语义：
+            // 查车结果卡片展示的 ID 是 TuneId，管理员看到的是调校行，故「修改车辆 <id>」
+            // 语义上等价于「修改调校 <id>」，不再操作 Vehicles 行。
             if (e.Detail.StartsWith("修改车辆"))
             {
                 if (!await CheckUser(e, user, false))
-                {
                     return true;
-                }
 
                 string detail = e.Detail["修改车辆".Length..].Trim();
                 string[] parts = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length < 1)
                 {
                     await botService.SendAsync(e,
-                        "格式：修改车辆 <车辆ID> [参数=值]\r\n" +
-                        "可用参数：等级= 比赛类型= 制造商= 型号= 年份= 传动= 属性= 胎面= 适用干/湿= 强度= 调校= 备注= 圈速=\r\n" +
-                        "示例：修改车辆 123 制造商=法拉利 型号=F40 年份=1992 等级=S2-900 强度=META+ 调校=\"Nyasmowisher[be my light]\"");
+                        "格式：修改车辆 <调校ID> [参数=值]\r\n" +
+                        "（调校ID 即查车结果中的 ID，修改调校显示字段）\r\n" +
+                        "可用参数：等级= 比赛类型= 驱动= 属性= 胎面= 干湿地= 强度= 调校= 备注= 圈速=\r\n" +
+                        "若需修改车型信息（制造商/型号），请使用「修改车型 <车型ID> ...」\r\n" +
+                        "示例：修改车辆 123 等级=S2-900 强度=META+ 调校=\"Nyasmowisher[be my light]\"");
                     return true;
                 }
 
-                VehicleRequest request = new();
-
-                if (int.TryParse(parts[0], out int vid))
+                if (!int.TryParse(parts[0], out int tuneIdAlias))
                 {
-                    request.Id = vid;
-                    // 剩余部分解析参数
-                    string remaining = string.Join(" ", parts[1..]);
-                    if (!ParseKeyValuePairs(remaining, request, out string parseError))
-                    {
-                        await botService.SendAsync(e, parseError);
-                        return true;
-                    }
-                }
-                else
-                {
-                    md.Content = "请提供车辆 ID。";
-                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
-                    return true;
-                }
-
-                if (!forzaService.UpdateVehicle(request, out string error))
-                {
-                    md.Content = error;
+                    md.Content = "请提供调校 ID（查车结果中的 ID）。";
                     reply.Keyboard = new KeyboardMessage().AppendButtons(2, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
                     await botService.SendAsync(e, reply);
                     return true;
                 }
 
-                md.Content = "车辆信息修改成功。";
+                VehicleTuneRequest tuneAliasReq = new() { Id = tuneIdAlias };
+                string tuneAliasRemaining = string.Join(" ", parts[1..]);
+                if (!string.IsNullOrEmpty(tuneAliasRemaining) && !ParseTuneKeyValuePairs(tuneAliasRemaining, tuneAliasReq, out string tuneAliasErr))
+                {
+                    await botService.SendAsync(e, tuneAliasErr);
+                    return true;
+                }
+
+                if (!forzaService.UpdateTune(tuneAliasReq, user!.Id, out string tuneAliasUpdErr))
+                {
+                    md.Content = $"❌ 修改失败：{tuneAliasUpdErr}";
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                md.Content = "✅ 调校信息修改成功。";
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            // 修改调校：按 TuneId 更新 VehicleTunes 显示字段，并置位 IsManual（决策15）
+            if (e.Detail.StartsWith("修改调校"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["修改调校".Length..].Trim();
+                string[] parts = detail.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 1 || !int.TryParse(parts[0], out int tuneId))
+                {
+                    await botService.SendAsync(e,
+                        "格式：修改调校 <调校ID> [参数=值]\r\n" +
+                        "可用参数：等级= 比赛类型= 驱动= 属性= 胎面= 干湿地= 强度= 调校= 备注= 圈速=\r\n" +
+                        "示例：修改调校 123 等级=S2-900 强度=META+ 调校=\"Nyasmowisher[be my light]\"");
+                    return true;
+                }
+
+                VehicleTuneRequest tuneReq = new() { Id = tuneId };
+                string remaining = string.Join(" ", parts[1..]);
+                if (!string.IsNullOrEmpty(remaining) && !ParseTuneKeyValuePairs(remaining, tuneReq, out string tuneParseErr))
+                {
+                    await botService.SendAsync(e, tuneParseErr);
+                    return true;
+                }
+
+                if (!forzaService.UpdateTune(tuneReq, user!.Id, out string tuneUpdErr))
+                {
+                    md.Content = $"❌ 修改调校失败：{tuneUpdErr}";
+                    reply.Keyboard = new KeyboardMessage().AppendButtons(2, Button.CreateCmdButton("🖌 重新修改", e.Detail, false));
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                md.Content = "✅ 调校信息修改成功。";
                 reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;
@@ -463,6 +548,115 @@ public partial class CandyBotService
                 return true;
             }
 
+            // 删除车型：按 VehicleId 删除 Vehicles 行，FK CASCADE 连带清除全部调校
+            // 必须在 删除车辆 之前匹配，防止前缀被截断
+            if (e.Detail.StartsWith("删除车型"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["删除车型".Length..].Trim();
+                if (string.IsNullOrEmpty(detail))
+                {
+                    await botService.SendAsync(e,
+                        "格式：删除车型 <车型ID> [id2 id3 ...]\r\n" +
+                        "⚠️ 删除车型会同时删除该车型下的所有调校！\r\n" +
+                        "示例：删除车型 5\r\n" +
+                        "示例：删除车型 5 6 7");
+                    return true;
+                }
+
+                string[] modelDelParts = detail.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
+                List<int> modelIds = [];
+                foreach (string p in modelDelParts)
+                {
+                    if (int.TryParse(p, out int id))
+                        modelIds.Add(id);
+                    else
+                    {
+                        md.Content = $"车型ID 必须为数字，无法识别：{p}";
+                        reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                        await botService.SendAsync(e, reply);
+                        return true;
+                    }
+                }
+
+                var (modelDelSuccess, modelDelMsg, _) = forzaService.DeleteVehicleModelsByIds(modelIds);
+                md.Content = modelDelSuccess ? $"✅ {modelDelMsg}" : $"❌ {modelDelMsg}";
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            // 删除调校：按 TuneId 删除 VehicleTunes 行（不影响车型）
+            // 必须在 删除车辆 之前匹配
+            if (e.Detail.StartsWith("删除调校"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["删除调校".Length..].Trim();
+                if (string.IsNullOrEmpty(detail))
+                {
+                    await botService.SendAsync(e,
+                        "格式：删除调校 <调校ID> [id2 id3 ...]\r\n" +
+                        "示例：删除调校 123\r\n" +
+                        "示例：删除调校 1 2 3");
+                    return true;
+                }
+
+                string[] tuneDelParts = detail.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
+                List<int> tuneDelIds = [];
+                foreach (string p in tuneDelParts)
+                {
+                    if (int.TryParse(p, out int id))
+                        tuneDelIds.Add(id);
+                    else
+                    {
+                        md.Content = $"调校ID 必须为数字，无法识别：{p}";
+                        reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                        await botService.SendAsync(e, reply);
+                        return true;
+                    }
+                }
+
+                var (tuneDelSuccess, tuneDelMsg, _) = forzaService.DeleteTunesByIds(tuneDelIds);
+                md.Content = tuneDelSuccess ? $"✅ {tuneDelMsg}" : $"❌ {tuneDelMsg}";
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
+            // 删除车辆（兼容别名）→ 实际委托给「删除调校」语义：
+            // 查车结果卡片展示的 ID 是 TuneId，「删除车辆 <id>」等价于「删除调校 <id>」。
+            if (e.Detail.StartsWith("确认删除车辆"))
+            {
+                if (!await CheckUser(e, user, false))
+                    return true;
+
+                string detail = e.Detail["确认删除车辆".Length..].Trim();
+                // 解析逗号分隔的 TuneId 列表
+                List<int> idsToDelete = [];
+                foreach (string token in detail.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (int.TryParse(token, out int id) && id > 0)
+                        idsToDelete.Add(id);
+                }
+
+                if (idsToDelete.Count == 0)
+                {
+                    md.Content = "未找到有效的调校 ID，请重新执行删除操作。";
+                    await botService.SendAsync(e, reply);
+                    return true;
+                }
+
+                var (delSuccess, delMsg, _) = forzaService.DeleteTunesByIds(idsToDelete);
+                md.Content = delSuccess ? $"✅ 已删除 {idsToDelete.Count} 条调校。" : $"❌ 删除失败：{delMsg}";
+                reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
+                await botService.SendAsync(e, reply);
+                return true;
+            }
+
             if (e.Detail.StartsWith("删除车辆"))
             {
                 if (!await CheckUser(e, user, false))
@@ -472,17 +666,14 @@ public partial class CandyBotService
                 if (string.IsNullOrEmpty(detail))
                 {
                     await botService.SendAsync(e,
-                        "格式：\n" +
-                        "1. 按 ID 删除：删除车辆 <id> [id2 id3 ...]\n" +
-                        "   示例：删除车辆 123\n" +
-                        "   示例：删除车辆 1 2 3\n" +
-                        "2. 按字段删除：删除车辆 制造商=xxx 型号=xxx 年份=yyyy 等级=xxx 比赛类型=xxx\n" +
-                        "   示例：删除车辆 制造商=法拉利 型号=F40 年份=1992 等级=S1 比赛类型=公路\n" +
-                        "   ⚠️ 按字段删除会列出所有匹配的车辆并需要二次确认。");
+                        "格式：删除车辆 <调校ID> [id2 id3 ...]\r\n" +
+                        "（调校ID 即查车结果中的 ID；如需删除整个车型及其全部调校，请使用「删除车型 <车型ID>」）\r\n" +
+                        "示例：删除车辆 123\r\n" +
+                        "示例：删除车辆 1 2 3");
                     return true;
                 }
 
-                // 尝试解析为ID列表（空格或逗号分隔）
+                // 尝试解析为TuneId列表（空格或逗号分隔）
                 string[] parts = detail.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
                 List<int> ids = [];
                 bool allAreNumbers = true;
@@ -497,82 +688,18 @@ public partial class CandyBotService
                     }
                 }
 
-                // 情况1：纯数字，按ID批量删除（直接执行，无需二次确认）
+                // 情况1：纯数字，按调校ID批量删除（直接执行，无需二次确认）
                 if (allAreNumbers && ids.Count > 0)
                 {
-                    var (success, msg, deletedCount) = forzaService.DeleteVehiclesByIds(ids);
+                    var (success, msg, _) = forzaService.DeleteTunesByIds(ids);
                     md.Content = success ? $"✅ {msg}" : $"❌ {msg}";
                     reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                     await botService.SendAsync(e, reply);
                     return true;
                 }
 
-                // 情况2：非纯数字，按字段匹配删除（需要二次确认）
-                VehicleRequest request = new();
-                if (!ParseKeyValuePairs(detail, request, out string parseError))
-                {
-                    await botService.SendAsync(e, parseError);
-                    return true;
-                }
-
-                var (findSuccess, findMsg, matches) = forzaService.FindVehiclesByCriteria(request);
-                if (!findSuccess || matches == null || matches.Count == 0)
-                {
-                    md.Content = findMsg;
-                    await botService.SendAsync(e, reply);
-                    return true;
-                }
-
-                // 构建显示列表
-                StringBuilder sb = new();
-                sb.AppendLine($"⚠️ 找到 {matches.Count} 辆匹配的车辆：");
-                foreach (ForzaService.VehicleMatch m in matches)
-                {
-                    sb.AppendLine($"• ID {m.Id}：{m.DisplayName}");
-                }
-                sb.AppendLine("\n是否确认删除以上所有车辆？");
-
-                // 将匹配到的 ID 列表编码进确认按钮，关闭 TOCTOU 窗口
-                string idListPayload = string.Join(",", matches.Select(m => m.Id.ToString()));
-
-                md.Content = sb.ToString();
-                reply.Keyboard = new KeyboardMessage()
-                    .AppendButtons(1, Button.CreateCmdButton("✅ 确认删除", "确认删除车辆 " + idListPayload, false));
-                await botService.SendAsync(e, reply);
-                return true;
-            }
-
-            if (e.Detail.StartsWith("确认删除车辆"))
-            {
-                if (!await CheckUser(e, user, false))
-                    return true;
-
-                string detail = e.Detail["确认删除车辆".Length..].Trim();
-                // 解析逗号分隔的 ID 列表
-                List<int> idsToDelete = [];
-                foreach (string token in detail.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries))
-                {
-                    if (int.TryParse(token, out int id) && id > 0)
-                        idsToDelete.Add(id);
-                }
-
-                if (idsToDelete.Count == 0)
-                {
-                    md.Content = "未找到有效的车辆 ID，请重新执行删除车辆操作。";
-                    await botService.SendAsync(e, reply);
-                    return true;
-                }
-
-                var (delSuccess, delMsg, _) = forzaService.DeleteVehiclesByIds(idsToDelete);
-                if (delSuccess)
-                {
-                    md.Content = $"✅ 已删除 {idsToDelete.Count} 辆车。";
-                }
-                else
-                {
-                    md.Content = $"❌ 删除失败：{delMsg}";
-                }
-
+                // 情况2：非纯数字，提示格式错误（旧的 FindVehiclesByCriteria 路径已废弃，ID 不可跨表混用）
+                md.Content = "调校ID 必须为数字。如需按车型条件查找，请先「查车 <关键字>」获取调校ID 后再删除。";
                 reply.Keyboard = new KeyboardMessage().AppendButtons(2, ForzaNavButtons());
                 await botService.SendAsync(e, reply);
                 return true;

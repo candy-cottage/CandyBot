@@ -456,4 +456,191 @@ public class CandyBotServiceTests
         // 兼容别名的空参数提示应包含新路径的格式说明
         sender.TextContents.Single().Should().Contain("格式：新增车辆");
     }
+
+    // ---- Task 15：删除车型/修改车型/删除调校/修改调校 路由与权限测试 -------------------
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_删除车型_非管理员被拒绝()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("删除车型 5");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Should().ContainSingle().Which.Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_删除车型_空参数回复用法提示()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("删除车型");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Single().Should().Contain("格式：删除车型");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_删除车型前缀先于删除车辆匹配()
+    {
+        // 「删除车型」必须在「删除车辆」之前匹配
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("删除车型");
+        await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        sender.TextContents.Single().Should().Contain("格式：删除车型",
+            "「删除车型」应在「删除车辆」之前被独立匹配");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_修改车型_非管理员被拒绝()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("修改车型 5 制造商=法拉利 型号=F40");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Should().ContainSingle().Which.Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_修改车型_空参数回复用法提示()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("修改车型");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Single().Should().Contain("格式：修改车型");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_修改车型前缀先于修改车辆匹配()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("修改车型");
+        await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        sender.TextContents.Single().Should().Contain("格式：修改车型",
+            "「修改车型」应在「修改车辆」之前被独立匹配");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_删除调校_非管理员被拒绝()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("删除调校 123");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Should().ContainSingle().Which.Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_删除调校_空参数回复用法提示()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("删除调校");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Single().Should().Contain("格式：删除调校");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_删除调校前缀先于删除车辆匹配()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("删除调校");
+        await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        sender.TextContents.Single().Should().Contain("格式：删除调校",
+            "「删除调校」应在「删除车辆」之前被独立匹配");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_修改调校_非管理员被拒绝()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("修改调校 123 驱动=四驱");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Should().ContainSingle().Which.Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_修改调校_空参数回复用法提示()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("修改调校");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Single().Should().Contain("格式：修改调校");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_修改调校前缀先于修改车辆匹配()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("修改调校");
+        await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        sender.TextContents.Single().Should().Contain("格式：修改调校",
+            "「修改调校」应被独立匹配（不会被「修改车辆」截断）");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_删除车辆_空参数回复新版格式提示()
+    {
+        // 删除车辆现在委托给调校删除路径，提示文案应反映这一变化
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("删除车辆");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Single().Should().Contain("调校ID");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_修改车辆_空参数回复新版格式提示()
+    {
+        // 修改车辆现在委托给调校修改路径，提示文案应反映这一变化
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("修改车辆");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Single().Should().Contain("调校ID");
+    }
 }
