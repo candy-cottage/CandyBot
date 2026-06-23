@@ -1545,4 +1545,102 @@ public class ForzaServiceTests(MySqlFixture fixture)
         DataRow? vRow = probe.ExecuteDataRow($"SELECT COUNT(*) FROM Vehicles WHERE Id = {vehicleId}");
         Convert.ToInt32(vRow![0]).Should().Be(1, "车型应仍存在");
     }
+    // =========================================================================
+    // FindVehiclesByCriteria — JOIN model (Fix 1)
+    // =========================================================================
+
+    [Fact]
+    public async Task FindVehiclesByCriteria_匹配到调校行()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型 + 调校
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "CriteriaMatch", Model = "CMModel", Year = "2020" },
+            0, out string modelErr);
+        modelErr.Should().BeEmpty();
+        vehicleId.Should().BeGreaterThan(0);
+
+        int tuneId = SeedTune(MinimalTuneRequest(vehicleId, cls: "S1", matchType: "Road", drivetrain: "AWD"));
+        tuneId.Should().BeGreaterThan(0);
+
+        // 按 Class + MatchType 匹配
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        var (success, message, matches) = svc.FindVehiclesByCriteria(new VehicleRequest
+        {
+            Class = "S1",
+            MatchType = "Road",
+        });
+
+        success.Should().BeTrue(message);
+        matches.Should().NotBeNull();
+        matches!.Should().NotBeEmpty("应至少命中一条调校");
+        matches.Should().Contain(m => m.Id == tuneId, "命中的 Id 应是 TuneId");
+        matches.First(m => m.Id == tuneId).DisplayName.Should().Contain("CriteriaMatch");
+    }
+
+    [Fact]
+    public async Task FindVehiclesByCriteria_不匹配时返回空()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型 + 调校（S1/Road）
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "NoMatchMaker", Model = "NoMatchModel" },
+            0, out string modelErr);
+        modelErr.Should().BeEmpty();
+
+        SeedTune(MinimalTuneRequest(vehicleId, cls: "S1", matchType: "Road", drivetrain: "AWD"));
+
+        // 按不存在的 Class 搜索
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        var (success, _, matches) = svc.FindVehiclesByCriteria(new VehicleRequest
+        {
+            Class = "ZZZ_NONEXISTENT",
+        });
+
+        success.Should().BeFalse("不匹配时应返回 false");
+        (matches == null || matches.Count == 0).Should().BeTrue("不匹配时 matches 应为空");
+    }
+
+    [Fact]
+    public async Task MatchVehicles_通过控制器调用_存在调校时返回OkObjectResult()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 建车型 + 调校
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "MatchCtrl", Model = "MatchCtrlModel" },
+            0, out string modelErr);
+        modelErr.Should().BeEmpty();
+        vehicleId.Should().BeGreaterThan(0);
+
+        int tuneId = SeedTune(MinimalTuneRequest(vehicleId, cls: "A", matchType: "Road", drivetrain: "AWD"));
+        tuneId.Should().BeGreaterThan(0);
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        ForzaController controller = new(svc);
+
+        IActionResult result = controller.MatchVehicles(
+            manufacturer: "MatchCtrl",
+            model: "MatchCtrlModel",
+            year: "",
+            classType: "A",
+            matchType: "Road");
+
+        result.Should().BeOfType<OkObjectResult>("有匹配调校时应返回 200 OK");
+        var ok = (OkObjectResult)result;
+        ok.Value.Should().NotBeNull();
+        var successProp = ok.Value!.GetType().GetProperty("success");
+        Convert.ToBoolean(successProp!.GetValue(ok.Value)).Should().BeTrue();
+    }
 }

@@ -773,24 +773,32 @@ namespace CandyCottage.CandyBot.Services
             {
                 sql.Parameters.Clear();
                 List<string> whereClauses = [];
-                AddWhereClause(whereClauses, "Manufacturer", request.Manufacturer);
-                AddWhereClause(whereClauses, "Model", request.Model);
-                AddWhereClause(whereClauses, "Year", request.Year);
-                AddWhereClause(whereClauses, "Class", request.Class);
-                AddWhereClause(whereClauses, "MatchType", request.MatchType);
-                AddWhereClause(whereClauses, "Drivetrain", request.Drivetrain);
-                AddWhereClause(whereClauses, "Attribute", request.Attribute);
-                AddWhereClause(whereClauses, "TireCompound", request.TireCompound);
-                AddWhereClause(whereClauses, "SurfaceCondition", request.SurfaceCondition);
-                AddWhereClause(whereClauses, "Strength", request.Strength);
-                AddWhereClause(whereClauses, "Tune", request.Tune);
-                AddWhereClause(whereClauses, "Remarks", request.Remarks);
-                AddWhereClause(whereClauses, "LapTime", request.LapTime);
+
+                // 车型字段 → v 表
+                AddWhereClause(whereClauses, "v.Manufacturer", "Manufacturer", request.Manufacturer);
+                AddWhereClause(whereClauses, "v.Model", "Model", request.Model);
+                AddWhereClause(whereClauses, "v.Year", "Year", request.Year);
+
+                // 调校字段 → t 表；Attribute → t.PerformancePreference；Tune → t.TuneRaw
+                AddWhereClause(whereClauses, "t.Class", "Class", request.Class);
+                AddWhereClause(whereClauses, "t.MatchType", "MatchType", request.MatchType);
+                AddWhereClause(whereClauses, "t.Drivetrain", "Drivetrain", request.Drivetrain);
+                AddWhereClause(whereClauses, "t.PerformancePreference", "Attribute", request.Attribute);
+                AddWhereClause(whereClauses, "t.TireCompound", "TireCompound", request.TireCompound);
+                AddWhereClause(whereClauses, "t.SurfaceCondition", "SurfaceCondition", request.SurfaceCondition);
+                AddWhereClause(whereClauses, "t.Strength", "Strength", request.Strength);
+                AddWhereClause(whereClauses, "t.TuneRaw", "Tune", request.Tune);
+                AddWhereClause(whereClauses, "t.Remarks", "Remarks", request.Remarks);
+                AddWhereClause(whereClauses, "t.LapTime", "LapTime", request.LapTime);
 
                 string query = @$"
-                    SELECT Id, Manufacturer, Model, Year, Class, MatchType, Drivetrain, Strength
-                    FROM Vehicles
-                    {string.Join(" ", whereClauses)}";
+                    SELECT t.Id AS TuneId, v.Id AS VehicleId,
+                           v.Manufacturer, v.Model, v.Year,
+                           t.Class, t.MatchType, t.Drivetrain, t.Strength
+                    FROM Vehicles v
+                    JOIN VehicleTunes t ON t.VehicleId = v.Id
+                    {string.Join(" ", whereClauses)}
+                    ORDER BY t.Class, v.Manufacturer, v.Model";
 
                 sql.ExecuteDataSet(query);
                 if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
@@ -799,15 +807,17 @@ namespace CandyCottage.CandyBot.Services
                 DataTable dt = sql.DataSet.Tables[0];
                 foreach (DataRow row in dt.Rows)
                 {
-                    string display = $"{row["Manufacturer"]} {row["Model"]} ({row["Year"]}) [{row["Class"]}/{row["MatchType"]}]";
+                    string year = row["Year"]?.ToString() ?? "";
+                    string yearPart = string.IsNullOrEmpty(year) ? "" : $" ({year})";
+                    string display = $"{row["Manufacturer"]} {row["Model"]}{yearPart} [{row["Class"]}/{row["MatchType"]}]";
                     matches.Add(new VehicleMatch
                     {
-                        Id = Convert.ToInt32(row["Id"]),
+                        Id = Convert.ToInt32(row["TuneId"]),
                         DisplayName = display
                     });
                 }
 
-                return (true, $"找到 {matches.Count} 辆匹配的车辆", matches);
+                return (true, $"找到 {matches.Count} 条匹配调校", matches);
             }
             catch (Exception ex)
             {
@@ -874,6 +884,20 @@ namespace CandyCottage.CandyBot.Services
             {
                 sql.Parameters[$"@{columnName}"] = value;
                 clauses.Add(($"{(clauses.Count == 0 ? "WHERE " : "AND ")}{columnName} = @{columnName}"));
+            }
+        }
+
+        /// <summary>
+        /// JOIN 查询专用重载：<paramref name="qualifiedColumn"/> 是带表前缀的列引用（如 <c>t.Class</c>），
+        /// <paramref name="paramName"/> 是无歧义的参数名（如 <c>Class</c>，对应绑定变量 <c>@Class</c>）。
+        /// null 或空串均视为"不过滤"。
+        /// </summary>
+        private void AddWhereClause(List<string> clauses, string qualifiedColumn, string paramName, string? value)
+        {
+            if (!string.IsNullOrEmpty(value))
+            {
+                sql.Parameters[$"@{paramName}"] = value;
+                clauses.Add(($"{(clauses.Count == 0 ? "WHERE " : "AND ")}{qualifiedColumn} = @{paramName}"));
             }
         }
 
