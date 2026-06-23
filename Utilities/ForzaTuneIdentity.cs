@@ -1,5 +1,7 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using CandyCottage.CandyBot.Models;
 
 namespace CandyCottage.CandyBot.Utilities;
 
@@ -114,6 +116,61 @@ public static partial class ForzaTuneIdentity
         string[] ids = [..tokens.Select(t => t.IdNormalized)];
         Array.Sort(ids, StringComparer.Ordinal);
         return string.Join('\x01', ids);
+    }
+
+    /// <summary>
+    /// §6 ModelKey：制造商 + 型号 + 年份（归一化）以 U+0001 连接的车型键。
+    /// Year 为 null 或 "" 时均归一化为空串，因此不产生额外区分度。
+    /// </summary>
+    public static string BuildModelKey(string? manufacturer, string? model, string? year) =>
+        string.Join('\x01', [Normalize(manufacturer), Normalize(model), Normalize(year ?? "")]);
+
+    /// <summary>
+    /// §4 SourceIdentity：在写入数据库时冻结的调校行身份标识，用于跨同步轮次定位同一行。
+    /// 由 modelKey 起头，接 6 个归一化配置字段（不含 SurfaceCondition/Strength 等展示字段），
+    /// 再接 fileId，全部以 U+0001 连接。fileId 保证跨表不会误匹配。
+    /// 前提：modelKey 必须先由 BuildModelKey 计算；调用方负责对哨兵/迁移行存入 ""。
+    /// </summary>
+    public static string BuildSourceIdentity(VehicleTuneRequest tune, string modelKey, string fileId)
+    {
+        string[] components =
+        [
+            modelKey,
+            Normalize(tune.Class),
+            Normalize(tune.MatchType),
+            Normalize(tune.Drivetrain),
+            Normalize(tune.PerformancePreference),
+            Normalize(tune.TireCompound),
+            TunerKey(ParseTuners(tune.TuneRaw)),
+        ];
+        return string.Join('\x01', components) + '\x01' + fileId;
+    }
+
+    /// <summary>
+    /// §5 SourceFingerprint：SHA-256（小写十六进制）覆盖所有面向用户展示的原始字段（含 SurfaceCondition、
+    /// Strength 等 identity 刻意排除的字段），以便在 identity 不变的前提下检测源内容是否变动。
+    /// 使用原始（未归一化）值，确保任何字符变更（包括大小写、标点）都能翻转指纹。
+    /// modelKey 参与计算，避免 identity 相同但来自不同车型的误相等。
+    /// </summary>
+    public static string BuildFingerprint(VehicleTuneRequest tune, string modelKey)
+    {
+        string[] parts =
+        [
+            modelKey,
+            tune.Class ?? "",
+            tune.MatchType ?? "",
+            tune.Drivetrain ?? "",
+            tune.PerformancePreference ?? "",
+            tune.TireCompound ?? "",
+            tune.TuneRaw ?? "",
+            tune.SurfaceCondition ?? "",
+            tune.Strength ?? "",
+            tune.Remarks ?? "",
+            tune.LapTime ?? "",
+        ];
+        string joined = string.Join('\x01', parts);
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(joined));
+        return Convert.ToHexStringLower(hash);
     }
 }
 
