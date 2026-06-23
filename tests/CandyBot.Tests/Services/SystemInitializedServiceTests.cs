@@ -30,7 +30,7 @@ public class SystemInitializedServiceTests
             bool syncStarted = false;
 
             IForzaSheetImporter importer = Substitute.For<IForzaSheetImporter>();
-            importer.SyncAsync(fileId, Arg.Any<CancellationToken>())
+            importer.SyncAsync(fileId, Arg.Any<long>(), Arg.Any<CancellationToken>())
                 .Returns(_ =>
                 {
                     syncStarted = true;

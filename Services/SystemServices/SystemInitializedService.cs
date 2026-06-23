@@ -44,7 +44,8 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             {
                 string fileId = forzaConfig.DocsID[docsName];
                 IForzaSheetImporter forzaSheetImporter = scope.ServiceProvider.GetRequiredService<IForzaSheetImporter>();
-                ForzaSheetSyncReport report = await forzaSheetImporter.SyncAsync(fileId);
+                // actorUserId: 0 → 系统/计划任务触发，无用户身份
+                ForzaSheetSyncReport report = await forzaSheetImporter.SyncAsync(fileId, actorUserId: 0);
                 MarkdownMessage md = new()
                 {
                     Content = ""

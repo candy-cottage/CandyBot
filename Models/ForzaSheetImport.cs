@@ -26,4 +26,6 @@ public sealed record ForzaSheetSyncReport(
     int UpdatedInPlaceCount = 0,
     int CachedCount = 0,
     int ExpiredCount = 0,
-    int DeletedTuneCount = 0);
+    int DeletedTuneCount = 0,
+    /// <summary>触发本次同步的用户 ID；0 表示系统/计划任务。</summary>
+    long ActorUserId = 0);

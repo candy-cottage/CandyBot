@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services.BotServices;
@@ -13,10 +14,43 @@ public sealed class ForzaSheetImporter(
     ForzaSyncService forzaSyncService,
     ISheetParseDiagnostic diagnostic) : IForzaSheetImporter
 {
-    public async Task<ForzaSheetSyncReport> SyncAsync(string fileId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// 按来源（fileId）隔离的串行锁字典。同一 fileId 的并发同步请求按顺序执行；
+    /// 不同 fileId 之间互不阻塞。<br/>
+    /// 防御目的：避免同一来源的计划任务与手动触发在 Reconcile 之前并发抓取/解析，
+    /// DB 层的 FOR UPDATE 行锁是额外的写保护层。
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _sourceLocks = new();
+
+    public async Task<ForzaSheetSyncReport> SyncAsync(string fileId, long actorUserId = 0, CancellationToken cancellationToken = default)
     {
-        Dictionary<string, List<List<string>>> sheets = await sheetService.GetSheetDataAsync(fileId);
-        return await SyncLoadedSheetsAsync(sheets, fileId, cancellationToken: cancellationToken);
+        return await RunSerializedAsync(fileId, async () =>
+        {
+            Dictionary<string, List<List<string>>> sheets = await sheetService.GetSheetDataAsync(fileId);
+            return await SyncLoadedSheetsAsync(sheets, fileId, actorUserId, cancellationToken);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// 对指定 <paramref name="fileId"/> 串行执行 <paramref name="body"/>：
+    /// 同一 fileId 的请求排队等待，不同 fileId 可并发。
+    /// 单元测试可直接调用此方法验证串行化行为。
+    /// </summary>
+    internal static async Task<T> RunSerializedAsync<T>(
+        string fileId,
+        Func<Task<T>> body,
+        CancellationToken cancellationToken)
+    {
+        SemaphoreSlim sem = _sourceLocks.GetOrAdd(fileId, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(cancellationToken);
+        try
+        {
+            return await body();
+        }
+        finally
+        {
+            sem.Release();
+        }
     }
 
     /// <summary>
@@ -99,7 +133,7 @@ public sealed class ForzaSheetImporter(
         if (tunes.Count == 0)
         {
             return new(false, previousCount, 0, 0, parsedClassSheets, skippedSheetNames, skippedRows, diagnostics,
-                "解析结果为 0，已拒绝覆盖旧数据。");
+                "解析结果为 0，已拒绝覆盖旧数据。", ActorUserId: actorUserId);
         }
 
         bool complete = ForzaTuneIdentity.IsCompleteSnapshot(
@@ -112,7 +146,8 @@ public sealed class ForzaSheetImporter(
             logger.LogError("Forza 同步协调失败（fileId={FileId}）：{Error}", fileId, rec.ErrorMessage);
             return new(false, previousCount, tunes.Count, 0,
                 parsedClassSheets, skippedSheetNames, skippedRows, diagnostics, rec.ErrorMessage,
-                ParsedTuneCount: rec.ParsedCount);
+                ParsedTuneCount: rec.ParsedCount,
+                ActorUserId: actorUserId);
         }
 
         return new(true, previousCount, tunes.Count, rec.Inserted,
@@ -121,7 +156,8 @@ public sealed class ForzaSheetImporter(
             UpdatedInPlaceCount: rec.UpdatedInPlace,
             CachedCount: rec.Cached,
             ExpiredCount: rec.Expired,
-            DeletedTuneCount: rec.Deleted);
+            DeletedTuneCount: rec.Deleted,
+            ActorUserId: actorUserId);
     }
 
     /// <summary>

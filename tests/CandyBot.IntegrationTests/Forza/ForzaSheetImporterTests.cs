@@ -220,6 +220,37 @@ public class ForzaSheetImporterTests(MySqlFixture fixture)
     }
 
     // =========================================================================
+    // 5. actorUserId 贯穿到报告与 VehicleTunes.LastUpdatedUserId
+    // =========================================================================
+    [Fact]
+    public async Task ActorUserId_贯穿到报告与LastUpdatedUserId()
+    {
+        await _fixture.ResetDataAsync();
+        const string fileId = "file-actor";
+        const long actorId = 42L;
+
+        Dictionary<string, List<List<string>>> sheets = new()
+        {
+            ["S1-公路"] = MakeSheetGrid("ActorMaker", "ActorModel", "S1", "公路"),
+        };
+
+        var (importer, sql) = NewImporter();
+        ForzaSheetSyncReport report;
+        using (sql) report = await importer.SyncLoadedSheetsAsync(sheets, fileId, actorUserId: actorId);
+
+        report.Success.Should().BeTrue(report.ErrorMessage);
+        report.ActorUserId.Should().Be(actorId, "报告中 ActorUserId 应与传入的 actorUserId 一致");
+
+        // 验证数据库中该调校行的 LastUpdatedUserId 也是 actorId
+        using MySQLHelper probe = _fixture.CreateHelper();
+        System.Data.DataRow? row = probe.ExecuteDataRow(
+            "SELECT LastUpdatedUserId FROM VehicleTunes WHERE SourceFileId = 'file-actor' LIMIT 1");
+        row.Should().NotBeNull("VehicleTunes 中应有来源 file-actor 的调校行");
+        Convert.ToInt64(row!["LastUpdatedUserId"]).Should().Be(actorId,
+            "VehicleTunes.LastUpdatedUserId 应等于传入的 actorUserId");
+    }
+
+    // =========================================================================
     // 构建测试用最小合法表格数据
     // =========================================================================
 
