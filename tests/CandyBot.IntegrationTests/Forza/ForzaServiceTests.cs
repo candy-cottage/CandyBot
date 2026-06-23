@@ -41,7 +41,10 @@ public class ForzaServiceTests(MySqlFixture fixture)
 
     // ---- 种子辅助 ----
 
-    /// <summary>创建一个最小合法 VehicleRequest，可按需覆写字段。</summary>
+    /// <summary>
+    /// 创建一个最小合法 VehicleRequest（用于兼容旧测试逻辑中仍需 VehicleRequest 的场景）。
+    /// 新测试应直接构造 VehicleModelRequest + VehicleTuneRequest 并调用 SeedVehicle(VehicleRequest)。
+    /// </summary>
     private static VehicleRequest MinimalVehicle(
         string manufacturer = "TestMaker",
         string model = "TestModel",
@@ -57,120 +60,201 @@ public class ForzaServiceTests(MySqlFixture fixture)
         };
 
     /// <summary>
-    /// 插入一辆车并返回其自增 Id。使用专属 helper 避免与测试 helper 的参数/事务状态纠缠。
+    /// 插入一辆车（车型+调校）并返回 VehicleId（Vehicles.Id）。
+    /// 通过新路径 EnsureVehicleModel + AddTune 灌库，与生产代码路径一致。
     /// </summary>
     private int SeedVehicle(VehicleRequest req)
     {
         using MySQLHelper sql = _fixture.CreateHelper();
         ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
-        svc.AddVehicle(req, out string err).Should().BeTrue(err);
-        return (int)sql.LastInsertId;
+
+        // 第一步：确保车型存在，获取 VehicleId
+        VehicleModelRequest modelReq = new()
+        {
+            Manufacturer = req.Manufacturer,
+            Model = req.Model,
+            Year = req.Year,
+        };
+        int vehicleId = svc.EnsureVehicleModel(modelReq, 0, out string modelErr);
+        vehicleId.Should().BeGreaterThan(0, modelErr);
+
+        // 第二步：插入调校记录（若调校必填字段非空）
+        if (!string.IsNullOrEmpty(req.Class) && !string.IsNullOrEmpty(req.MatchType))
+        {
+            VehicleTuneRequest tuneReq = new()
+            {
+                VehicleId = vehicleId,
+                Class = req.Class,
+                MatchType = req.MatchType,
+                Drivetrain = req.Drivetrain,
+                PerformancePreference = req.Attribute,
+                TireCompound = req.TireCompound,
+                SurfaceCondition = req.SurfaceCondition,
+                Strength = req.Strength,
+                TuneRaw = req.Tune,
+                Remarks = req.Remarks,
+                LapTime = req.LapTime,
+            };
+            int tuneId = svc.AddTune(tuneReq, 0, out string tuneErr);
+            tuneId.Should().BeGreaterThan(0, tuneErr);
+        }
+
+        return vehicleId;
     }
 
     // =========================================================================
-    // AddVehicle 校验（必填字段 + 成功路径）
+    // EnsureVehicleModel 校验（新增车型路径）
     // =========================================================================
 
     [Fact]
-    public async Task AddVehicle_缺少Manufacturer返回false且错误消息正确()
+    public async Task EnsureVehicleModel_缺少Manufacturer返回0且错误消息正确()
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
         ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
-        VehicleRequest req = MinimalVehicle();
-        req.Manufacturer = null;
+        int vid = svc.EnsureVehicleModel(new VehicleModelRequest { Model = "TestModel" }, 0, out string error);
 
-        bool ok = svc.AddVehicle(req, out string error);
-
-        ok.Should().BeFalse();
+        vid.Should().Be(0);
         error.Should().Be("制造商不能为空。");
     }
 
     [Fact]
-    public async Task AddVehicle_缺少Model返回false且错误消息正确()
+    public async Task EnsureVehicleModel_缺少Model返回0且错误消息正确()
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
         ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
-        VehicleRequest req = MinimalVehicle();
-        req.Model = null;
+        int vid = svc.EnsureVehicleModel(new VehicleModelRequest { Manufacturer = "TestMaker" }, 0, out string error);
 
-        bool ok = svc.AddVehicle(req, out string error);
-
-        ok.Should().BeFalse();
+        vid.Should().Be(0);
         error.Should().Be("型号不能为空。");
     }
 
+    // =========================================================================
+    // AddTune 校验（新增调校路径）
+    // =========================================================================
+
     [Fact]
-    public async Task AddVehicle_缺少Class返回false且错误消息正确()
+    public async Task AddTune_缺少VehicleId返回0且错误消息正确()
     {
         await _fixture.ResetDataAsync();
         using MySQLHelper sql = _fixture.CreateHelper();
         ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
-        VehicleRequest req = MinimalVehicle();
-        req.Class = null;
+        VehicleTuneRequest req = new() { Class = "S1", MatchType = "Road", Drivetrain = "AWD" };
+        int tuneId = svc.AddTune(req, 0, out string error);
 
-        bool ok = svc.AddVehicle(req, out string error);
+        tuneId.Should().Be(0);
+        error.Should().Be("车辆ID不能为空。");
+    }
 
-        ok.Should().BeFalse();
+    [Fact]
+    public async Task AddTune_VehicleId不存在返回0且错误消息包含不存在()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+
+        VehicleTuneRequest req = new() { VehicleId = 999999, Class = "S1", MatchType = "Road", Drivetrain = "AWD" };
+        int tuneId = svc.AddTune(req, 0, out string error);
+
+        tuneId.Should().Be(0);
+        error.Should().Contain("不存在");
+    }
+
+    [Fact]
+    public async Task AddTune_缺少Class返回0且错误消息正确()
+    {
+        await _fixture.ResetDataAsync();
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vid = svcModel.EnsureVehicleModel(MinimalVehicleModel("AddTuneMaker", "AddTuneModel"), 0, out _);
+        vid.Should().BeGreaterThan(0);
+
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        VehicleTuneRequest req = new() { VehicleId = vid, MatchType = "Road", Drivetrain = "AWD" };
+        int tuneId = svc.AddTune(req, 0, out string error);
+
+        tuneId.Should().Be(0);
         error.Should().Be("等级不能为空。");
     }
 
     [Fact]
-    public async Task AddVehicle_缺少MatchType返回false且错误消息正确()
+    public async Task AddTune_缺少MatchType返回0且错误消息正确()
     {
         await _fixture.ResetDataAsync();
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vid = svcModel.EnsureVehicleModel(MinimalVehicleModel("AddTuneMaker2", "AddTuneModel2"), 0, out _);
+        vid.Should().BeGreaterThan(0);
+
         using MySQLHelper sql = _fixture.CreateHelper();
         ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        VehicleTuneRequest req = new() { VehicleId = vid, Class = "S1", Drivetrain = "AWD" };
+        int tuneId = svc.AddTune(req, 0, out string error);
 
-        VehicleRequest req = MinimalVehicle();
-        req.MatchType = null;
-
-        bool ok = svc.AddVehicle(req, out string error);
-
-        ok.Should().BeFalse();
+        tuneId.Should().Be(0);
         error.Should().Be("比赛类型不能为空。");
     }
 
     [Fact]
-    public async Task AddVehicle_缺少Drivetrain返回false且错误消息正确()
+    public async Task AddTune_缺少Drivetrain返回0且错误消息正确()
     {
         await _fixture.ResetDataAsync();
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vid = svcModel.EnsureVehicleModel(MinimalVehicleModel("AddTuneMaker3", "AddTuneModel3"), 0, out _);
+        vid.Should().BeGreaterThan(0);
+
         using MySQLHelper sql = _fixture.CreateHelper();
         ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        VehicleTuneRequest req = new() { VehicleId = vid, Class = "S1", MatchType = "Road" };
+        int tuneId = svc.AddTune(req, 0, out string error);
 
-        VehicleRequest req = MinimalVehicle();
-        req.Drivetrain = null;
-
-        bool ok = svc.AddVehicle(req, out string error);
-
-        ok.Should().BeFalse();
+        tuneId.Should().Be(0);
         error.Should().Be("驱动类型不能为空。");
     }
 
     [Fact]
-    public async Task AddVehicle_完整必填字段新增成功且可查询到()
+    public async Task AddTune_合法_插入成功且IsManual为1且SourceIdentity为空()
     {
         await _fixture.ResetDataAsync();
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vid = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "Honda", Model = "Civic", Year = "2022" },
+            42, out string modelErr);
+        modelErr.Should().BeEmpty();
+        vid.Should().BeGreaterThan(0);
+
         using MySQLHelper sql = _fixture.CreateHelper();
         ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        VehicleTuneRequest req = new()
+        {
+            VehicleId = vid,
+            Class = "A",
+            MatchType = "Road",
+            Drivetrain = "FWD",
+            Strength = "META",
+        };
+        int tuneId = svc.AddTune(req, 42, out string error);
 
-        VehicleRequest req = MinimalVehicle("Honda", "Civic", "A", "Road", "FWD");
-        req.Year = "2022";
+        tuneId.Should().BeGreaterThan(0, error);
 
-        bool ok = svc.AddVehicle(req, out string error);
-        int newId = (int)sql.LastInsertId;
-
-        ok.Should().BeTrue(error);
-        newId.Should().BeGreaterThan(0);
-
-        // 用 GetVehicleInfoRaw 验证车辆可查询到
+        // 验证 IsManual=1、SourceIdentity=""
         using MySQLHelper probe = _fixture.CreateHelper();
-        ForzaService probeSvc = new(NullLogger<ForzaService>.Instance, probe, _forzaConfig);
-        var (success, _, data, _) = probeSvc.GetVehicleInfoRaw("Civic", 1);
+        DataRow? row = probe.ExecuteDataRow($"SELECT IsManual, SourceIdentity FROM VehicleTunes WHERE Id = {tuneId}");
+        row.Should().NotBeNull();
+        Convert.ToInt32(row!["IsManual"]).Should().Be(1, "手动新增调校的 IsManual 必须为 1");
+        row["SourceIdentity"].ToString().Should().BeEmpty("手动调校的 SourceIdentity 必须为空串");
+
+        // 用 GetVehicleInfoRaw 验证可查询到
+        using MySQLHelper queryHelper = _fixture.CreateHelper();
+        ForzaService querySvc = new(NullLogger<ForzaService>.Instance, queryHelper, _forzaConfig);
+        var (success, _, data, _) = querySvc.GetVehicleInfoRaw("Civic", 1);
         success.Should().BeTrue();
         data.Should().NotBeNull();
         data!.Rows.Count.Should().BeGreaterThan(0);
@@ -178,20 +262,43 @@ public class ForzaServiceTests(MySqlFixture fixture)
     }
 
     [Fact]
-    public async Task InsertVehicle_不开启自身事务_可由外层事务回滚()
+    public async Task AddTune_同车型多条手动调校_seq递增不撞唯一键()
     {
         await _fixture.ResetDataAsync();
-        using MySQLHelper sql = _fixture.CreateHelper();
-        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vid = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "SeqMaker", Model = "SeqModel" },
+            0, out string modelErr);
+        modelErr.Should().BeEmpty();
+        vid.Should().BeGreaterThan(0);
 
-        sql.NewTransaction();
-        bool ok = svc.InsertVehicle(MinimalVehicle("RollbackMaker", "RollbackModel", "A", "公路", "四驱"), out string error);
-        ok.Should().BeTrue(error);
-        sql.Rollback();
+        // 插入三条手动调校
+        List<int> tuneIds = [];
+        for (int i = 0; i < 3; i++)
+        {
+            using MySQLHelper sql = _fixture.CreateHelper();
+            ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+            VehicleTuneRequest req = new()
+            {
+                VehicleId = vid,
+                Class = "S1",
+                MatchType = "Road",
+                Drivetrain = "AWD",
+                Strength = $"Strength-{i}",
+            };
+            int tuneId = svc.AddTune(req, 0, out string err);
+            tuneId.Should().BeGreaterThan(0, $"第 {i+1} 条手动调校应插入成功，错误：{err}");
+            tuneIds.Add(tuneId);
+        }
 
+        tuneIds.Should().OnlyHaveUniqueItems("三条手动调校 ID 必须各不相同");
+
+        // 验证 SourceIdentitySeq 不重复（在 ('','') 槽内递增）
         using MySQLHelper probe = _fixture.CreateHelper();
-        DataRow? row = probe.ExecuteDataRow("SELECT COUNT(*) FROM Vehicles WHERE Manufacturer='RollbackMaker'");
-        Convert.ToInt32(row![0]).Should().Be(0);
+        DataRow? seqRow = probe.ExecuteDataRow(
+            "SELECT COUNT(DISTINCT SourceIdentitySeq) FROM VehicleTunes WHERE SourceFileId = '' AND SourceIdentity = ''");
+        Convert.ToInt32(seqRow![0]).Should().Be(3, "三条手动调校的 SourceIdentitySeq 应各不相同");
     }
 
     // =========================================================================
@@ -509,10 +616,10 @@ public class ForzaServiceTests(MySqlFixture fixture)
         var (success, _) = svc.GetVehiclesByClassOrMatchType("S2", "Road", 1, out _);
         success.Should().BeTrue("OR 查询至少应命中 Mv1/Mv2/Mv3");
 
-        // 直接用 SQL 计数验证 OR 语义
+        // 直接用 SQL 计数验证 OR 语义（Class/MatchType 在 VehicleTunes 表）
         using MySQLHelper probe = _fixture.CreateHelper();
         DataRow? row = probe.ExecuteDataRow(
-            "SELECT COUNT(*) FROM Vehicles WHERE Class='S2' OR MatchType='Road'");
+            "SELECT COUNT(*) FROM VehicleTunes WHERE Class='S2' OR MatchType='Road'");
         int orCount = Convert.ToInt32(row![0]);
         orCount.Should().Be(3, "OR 应返回满足任一条件的行（Mv1、Mv2、Mv3）");
     }
@@ -547,10 +654,10 @@ public class ForzaServiceTests(MySqlFixture fixture)
         SeedVehicle(MinimalVehicle("Maker", "Mv2", "S2", "Rally", "AWD")); // 只满足 Class
         SeedVehicle(MinimalVehicle("Maker", "Mv3", "A", "Road", "AWD"));   // 只满足 MatchType
 
-        // OR 计数（直接 SQL）
+        // OR 计数（直接 SQL，Class/MatchType 在 VehicleTunes 表）
         using MySQLHelper sqlOr = _fixture.CreateHelper();
         DataRow? orRow = sqlOr.ExecuteDataRow(
-            "SELECT COUNT(*) FROM Vehicles WHERE Class='S2' OR MatchType='Road'");
+            "SELECT COUNT(*) FROM VehicleTunes WHERE Class='S2' OR MatchType='Road'");
         int orCount = Convert.ToInt32(orRow![0]);
 
         // AND 计数（通过 service Raw 方法）
