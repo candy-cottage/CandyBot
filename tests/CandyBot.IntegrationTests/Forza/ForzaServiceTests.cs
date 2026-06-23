@@ -888,4 +888,103 @@ public class ForzaServiceTests(MySqlFixture fixture)
         (row["SourceFingerprint"] == DBNull.Value || row["SourceFingerprint"].ToString() == "").Should().BeTrue("无来源时 SourceFingerprint 应为 NULL");
     }
 
+    // =========================================================================
+    // Task 13 — JOIN 读路径：DataTable 列别名 + 分页以调校行为粒度
+    // =========================================================================
+
+    /// <summary>
+    /// 建立一辆车型 + 一条调校，验证查询结果的 DataTable 列名是旧别名
+    /// （Attribute 而非 PerformancePreference，Tune 而非 TuneRaw）——渲染器依赖旧列名。
+    /// </summary>
+    [Fact]
+    public async Task GetVehicleInfoRaw_JOIN查询_DataTable列名为旧别名Attribute和Tune()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 先建车型
+        using MySQLHelper sqlModel = _fixture.CreateHelper();
+        ForzaService svcModel = new(NullLogger<ForzaService>.Instance, sqlModel, _forzaConfig);
+        int vehicleId = svcModel.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "JoinMaker", Model = "JoinModel", Year = "2024" },
+            0, out string modelErr);
+        modelErr.Should().BeEmpty();
+        vehicleId.Should().BeGreaterThan(0);
+
+        // 插入一条调校（含 PerformancePreference 和 TuneRaw）
+        VehicleTuneRequest tuneReq = new()
+        {
+            VehicleId = vehicleId,
+            Class = "S1",
+            MatchType = "公路",
+            Drivetrain = "四驱",
+            PerformancePreference = "均衡",
+            TuneRaw = "JoinTune123",
+            Strength = "META",
+        };
+        int tuneId = SeedTune(tuneReq);
+        tuneId.Should().BeGreaterThan(0);
+
+        // 通过 GetVehicleInfoRaw 触发 JOIN 查询
+        using MySQLHelper sql = _fixture.CreateHelper();
+        ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
+        var (success, _, data, _) = svc.GetVehicleInfoRaw("JoinModel", 1);
+
+        success.Should().BeTrue("应能查到该调校对应的记录");
+        data.Should().NotBeNull();
+        data!.Rows.Count.Should().BeGreaterThan(0);
+
+        // 核心断言：列名必须是旧别名，而非 PerformancePreference/TuneRaw
+        data.Columns.Contains("Attribute").Should().BeTrue("JOIN SELECT 必须含 PerformancePreference AS Attribute");
+        data.Columns.Contains("Tune").Should().BeTrue("JOIN SELECT 必须含 TuneRaw AS Tune");
+        data.Columns.Contains("PerformancePreference").Should().BeFalse("不应暴露 PerformancePreference 列名");
+        data.Columns.Contains("TuneRaw").Should().BeFalse("不应暴露 TuneRaw 列名");
+
+        // 值也正确
+        data.Rows[0]["Attribute"].ToString().Should().Be("均衡");
+        data.Rows[0]["Tune"].ToString().Should().Be("JoinTune123");
+        data.Rows[0]["Manufacturer"].ToString().Should().Be("JoinMaker");
+        data.Rows[0]["Model"].ToString().Should().Be("JoinModel");
+    }
+
+    /// <summary>
+    /// 建立 2 辆车型，每辆 8 条调校（合计 16 条），pageSize=12 时 totalPages=2。
+    /// 验证 COUNT 查的是调校行（与 SELECT 同 JOIN/WHERE），而非车型行。
+    /// </summary>
+    [Fact]
+    public async Task GetVehicleInfoRaw_分页_超过12条调校时totalPages以调校行数计算()
+    {
+        await _fixture.ResetDataAsync();
+
+        // 车型 A：8 条调校
+        using MySQLHelper sqlA = _fixture.CreateHelper();
+        ForzaService svcA = new(NullLogger<ForzaService>.Instance, sqlA, _forzaConfig);
+        int vidA = svcA.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "PageMaker", Model = "PageModelA" },
+            0, out string errA);
+        errA.Should().BeEmpty();
+
+        for (int i = 0; i < 8; i++)
+            SeedTune(new VehicleTuneRequest { VehicleId = vidA, Class = "A", MatchType = "公路", Drivetrain = "前驱", TuneRaw = $"tune-A-{i}" });
+
+        // 车型 B：8 条调校
+        using MySQLHelper sqlB = _fixture.CreateHelper();
+        ForzaService svcB = new(NullLogger<ForzaService>.Instance, sqlB, _forzaConfig);
+        int vidB = svcB.EnsureVehicleModel(
+            new VehicleModelRequest { Manufacturer = "PageMaker", Model = "PageModelB" },
+            0, out string errB);
+        errB.Should().BeEmpty();
+
+        for (int i = 0; i < 8; i++)
+            SeedTune(new VehicleTuneRequest { VehicleId = vidB, Class = "A", MatchType = "公路", Drivetrain = "前驱", TuneRaw = $"tune-B-{i}" });
+
+        // 搜索 "PageMaker"，总共 16 条调校
+        using MySQLHelper sqlQ = _fixture.CreateHelper();
+        ForzaService svcQ = new(NullLogger<ForzaService>.Instance, sqlQ, _forzaConfig);
+        var (success, _, data, totalPages) = svcQ.GetVehicleInfoRaw("PageMaker", 1);
+
+        success.Should().BeTrue();
+        data.Should().NotBeNull();
+        data!.Rows.Count.Should().Be(12, "第 1 页应返回 12 条（pageSize 默认 12）");
+        totalPages.Should().Be(2, "16 条调校 / 12 = ceil(1.33) = 2 页");
+    }
 }

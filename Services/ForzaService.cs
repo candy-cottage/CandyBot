@@ -13,16 +13,24 @@ namespace CandyCottage.CandyBot.Services
             if (page < 1) page = 1;
             int offset = (page - 1) * pageSize;
 
+            // 每调校一卡：从 Vehicles v JOIN VehicleTunes t 读取，SELECT 用旧别名保持渲染器兼容性。
+            // whereClause 中的列引用须已由调用方 table-qualify（v.Manufacturer/v.Model、t.Class/t.MatchType 等）。
+            string fromJoin = "FROM Vehicles v JOIN VehicleTunes t ON t.VehicleId = v.Id";
             string query = $@"
-                SELECT 
-                    Id, Class, MatchType, Manufacturer, Model, Year, Drivetrain,
-                    Attribute, TireCompound, SurfaceCondition, Strength, Tune, Remarks, LapTime
-                FROM Vehicles
+                SELECT
+                    t.Id AS Id, t.Class, t.MatchType,
+                    v.Manufacturer, v.Model, v.Year,
+                    t.Drivetrain,
+                    t.PerformancePreference AS Attribute,
+                    t.TireCompound, t.SurfaceCondition, t.Strength,
+                    t.TuneRaw AS Tune,
+                    t.Remarks, t.LapTime
+                {fromJoin}
                 {whereClause}
-                ORDER BY Class, Manufacturer, Model
+                ORDER BY t.Class, v.Manufacturer, v.Model
                 LIMIT {offset}, {pageSize}";
 
-            // 参数传不过来，临时不清参数
+            // 参数需在 SELECT 和 COUNT 之间复用，临时不清参数
             sql.ClearParametersAfterExecute = false;
             sql.ExecuteDataSet(query);
             sql.ClearParametersAfterExecute = true;
@@ -32,8 +40,8 @@ namespace CandyCottage.CandyBot.Services
 
             DataTable dt = sql.DataSet.Tables[0];
 
-            // 计算总记录数
-            string countQuery = $"SELECT COUNT(*) FROM Vehicles {whereClause}";
+            // COUNT 与 SELECT 同 FROM/JOIN/WHERE，计数调校行（每调校一卡）
+            string countQuery = $"SELECT COUNT(*) {fromJoin} {whereClause}";
             DataRow? dr = sql.ExecuteDataRow(countQuery);
             int totalCount = 0;
             if (sql.Success && dr != null) _ = int.TryParse(dr[0].ToString(), out totalCount);
@@ -254,18 +262,19 @@ namespace CandyCottage.CandyBot.Services
 
             sql.Parameters["@search"] = $"%{EscapeLikeWildcards(keyword)}%";
             sql.Parameters["@compactSearch"] = $"%{EscapeLikeWildcards(keyword.Replace(" ", ""))}%";
+            // JOIN 路径后必须 table-qualify 所有来自 Vehicles 的列
             List<string> conditions =
             [
-                "Manufacturer LIKE @search",
-                "Model LIKE @search",
-                "REPLACE(CONCAT(Manufacturer, Model), ' ', '') LIKE @compactSearch",
+                "v.Manufacturer LIKE @search",
+                "v.Model LIKE @search",
+                "REPLACE(CONCAT(v.Manufacturer, v.Model), ' ', '') LIKE @compactSearch",
             ];
 
             for (int i = 0; i < aliasSearches.Count; i++)
             {
                 sql.Parameters[$"@aliasManufacturer{i}"] = aliasSearches[i].Manufacturer;
                 sql.Parameters[$"@aliasModel{i}"] = $"%{EscapeLikeWildcards(aliasSearches[i].ModelKeyword)}%";
-                conditions.Add($"(Manufacturer = @aliasManufacturer{i} AND REPLACE(Model, ' ', '') LIKE @aliasModel{i})");
+                conditions.Add($"(v.Manufacturer = @aliasManufacturer{i} AND REPLACE(v.Model, ' ', '') LIKE @aliasModel{i})");
             }
 
             return "WHERE " + string.Join(" OR ", conditions);
@@ -343,12 +352,13 @@ namespace CandyCottage.CandyBot.Services
             if (!string.IsNullOrEmpty(classInput))
             {
                 sql.Parameters["@class"] = classInput;
-                conditions.Add("Class = @class");
+                // JOIN 路径用 t.Class（来自 VehicleTunes）
+                conditions.Add("t.Class = @class");
             }
             if (!string.IsNullOrEmpty(matchTypeInput))
             {
                 sql.Parameters["@matchType"] = matchTypeInput;
-                conditions.Add("MatchType = @matchType");
+                conditions.Add("t.MatchType = @matchType");
             }
 
             string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(" AND ", conditions);
@@ -369,12 +379,13 @@ namespace CandyCottage.CandyBot.Services
             if (!string.IsNullOrEmpty(manufacturer))
             {
                 sql.Parameters["@manufacturer"] = $"%{EscapeLikeWildcards(manufacturer)}%";
-                conditions.Add("Manufacturer LIKE @manufacturer");
+                // JOIN 路径用 v.Manufacturer（来自 Vehicles）
+                conditions.Add("v.Manufacturer LIKE @manufacturer");
             }
             if (!string.IsNullOrEmpty(model))
             {
                 sql.Parameters["@model"] = $"%{EscapeLikeWildcards(model)}%";
-                conditions.Add("Model LIKE @model");
+                conditions.Add("v.Model LIKE @model");
             }
 
             string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(" AND ", conditions);
@@ -387,12 +398,13 @@ namespace CandyCottage.CandyBot.Services
             if (classInput != null)
             {
                 sql.Parameters["@class"] = classInput;
-                conditions.Add("Class = @class");
+                // JOIN 路径用 t.Class（来自 VehicleTunes）
+                conditions.Add("t.Class = @class");
             }
             if (matchTypeInput != null)
             {
                 sql.Parameters["@matchType"] = matchTypeInput;
-                conditions.Add("MatchType = @matchType");
+                conditions.Add("t.MatchType = @matchType");
             }
 
             string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(" OR ", conditions);
@@ -405,12 +417,13 @@ namespace CandyCottage.CandyBot.Services
             if (classInput != null)
             {
                 sql.Parameters["@class"] = classInput;
-                conditions.Add("Class = @class");
+                // JOIN 路径用 t.Class（来自 VehicleTunes）
+                conditions.Add("t.Class = @class");
             }
             if (matchTypeInput != null)
             {
                 sql.Parameters["@matchType"] = matchTypeInput;
-                conditions.Add("MatchType = @matchType");
+                conditions.Add("t.MatchType = @matchType");
             }
 
             string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(" AND ", conditions);
