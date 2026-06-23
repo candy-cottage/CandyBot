@@ -78,6 +78,7 @@ builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<UserAPITokenService>();
 builder.Services.AddScoped<BettingService>();
 builder.Services.AddScoped<ForzaService>();
+builder.Services.AddScoped<ForzaSyncService>();
 builder.Services.AddScoped<NoOpSheetParseDiagnostic>();
 builder.Services.AddScoped<DeepSeekSheetParseDiagnostic>();
 builder.Services.AddScoped<ISheetParseDiagnostic>(sp =>
