@@ -1242,6 +1242,7 @@ namespace CandyCottage.CandyBot.Services
                 ("调校", "TuneRaw"),
                 ("备注", "Remarks"),
                 ("圈速", "LapTime"),
+                ("扩展数据", "ExtData"),
             ];
 
             StringBuilder sb = new();

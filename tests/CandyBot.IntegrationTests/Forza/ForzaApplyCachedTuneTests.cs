@@ -119,6 +119,15 @@ public class ForzaApplyCachedTuneTests(MySqlFixture fixture)
             raw.Success.Should().BeTrue();
         }
 
+        // 记录 apply 前的 SourceIdentity
+        string originalSourceIdentity;
+        using (MySQLHelper probeId = _fixture.CreateHelper())
+        {
+            DataRow? idRow = probeId.ExecuteDataRow($"SELECT SourceIdentity FROM VehicleTunes WHERE Id = {tuneId}");
+            idRow.Should().NotBeNull();
+            originalSourceIdentity = idRow!["SourceIdentity"].ToString()!;
+        }
+
         // 灌入缓存行（新源：Class='A'，Remarks='cached remark'，SourceFingerprint 不同）
         SeedCacheRow(tuneId, vid, "A", "cached remark", "fp-new");
 
@@ -133,6 +142,7 @@ public class ForzaApplyCachedTuneTests(MySqlFixture fixture)
 
         // 断言：live 行已从缓存覆写
         DataRow live = ReadTune(tuneId);
+        live["SourceIdentity"].ToString().Should().Be(originalSourceIdentity, "ApplyCachedTune 不得修改 SourceIdentity");
         live["Class"].ToString().Should().Be("A", "Class 应从缓存覆写");
         live["Remarks"].ToString().Should().Be("cached remark", "Remarks 应从缓存覆写");
         live["SourceFingerprint"].ToString().Should().Be("fp-new", "SourceFingerprint 应从缓存更新");

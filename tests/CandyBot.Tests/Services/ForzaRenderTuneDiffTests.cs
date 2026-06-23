@@ -15,7 +15,8 @@ public class ForzaRenderTuneDiffTests
     private static DataRow MakeRow(
         string cls = "S1", string matchType = "公路", string drivetrain = "四驱",
         string perfPref = "", string tireCompound = "", string surfCond = "",
-        string strength = "", string tuneRaw = "", string remarks = "", string lapTime = "")
+        string strength = "", string tuneRaw = "", string remarks = "", string lapTime = "",
+        string extData = "")
     {
         DataTable dt = new();
         dt.Columns.Add("Class");
@@ -28,6 +29,7 @@ public class ForzaRenderTuneDiffTests
         dt.Columns.Add("TuneRaw");
         dt.Columns.Add("Remarks");
         dt.Columns.Add("LapTime");
+        dt.Columns.Add("ExtData");
 
         DataRow row = dt.NewRow();
         row["Class"] = cls;
@@ -40,6 +42,7 @@ public class ForzaRenderTuneDiffTests
         row["TuneRaw"] = tuneRaw;
         row["Remarks"] = remarks;
         row["LapTime"] = lapTime;
+        row["ExtData"] = extData;
         dt.Rows.Add(row);
         return row;
     }

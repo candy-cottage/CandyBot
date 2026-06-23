@@ -470,4 +470,59 @@ public class ForzaSyncServiceTests(MySqlFixture fixture)
             .Should().Be(1, "migration 哨兵行不应被协调删除");
         ReadTune(sentinelId)["TuneStatus"].ToString().Should().Be("正常", "哨兵行不应被置过时");
     }
+    // =========================================================================
+    // 11. 混合孪生缺失 P0：同 SourceIdentity 组内一手动一自动，完整快照仅含手动行
+    // =========================================================================
+    [Fact]
+    public async Task 混合孪生缺失_手动行保留_自动行删除()
+    {
+        await _fixture.ResetDataAsync();
+        const string fileId = "file-11";
+        int vid = EnsureModel("TestMaker", "ModelK");
+
+        // 两条孪生：同 SourceIdentity（identity 字段完全相同），一手动一自动，仅 SurfaceCondition 不同（非 identity 字段）
+        VehicleTuneRequest manualReq = ParsedTune("TestMaker", "ModelK", surfaceCondition: "干", remarks: "手动行");
+        manualReq.SourceFileId = fileId; manualReq.VehicleId = vid;
+        int manualId = SeedTune(manualReq, seq: 0);
+        using (MySQLHelper raw = _fixture.CreateHelper())
+        {
+            raw.Execute($"UPDATE VehicleTunes SET IsManual = 1 WHERE Id = {manualId}");
+            raw.Success.Should().BeTrue();
+        }
+        string manualFingerprint;
+        using (MySQLHelper probe = _fixture.CreateHelper())
+        {
+            DataRow? r = probe.ExecuteDataRow($"SELECT SourceFingerprint, SourceIdentity FROM VehicleTunes WHERE Id = {manualId}");
+            r.Should().NotBeNull();
+            manualFingerprint = r!["SourceFingerprint"].ToString()!;
+            manualFingerprint.Should().NotBeEmpty("手动行的指纹应非空");
+        }
+
+        VehicleTuneRequest autoReq = ParsedTune("TestMaker", "ModelK", surfaceCondition: "湿地", remarks: "自动行");
+        autoReq.SourceFileId = fileId; autoReq.VehicleId = vid;
+        int autoId = SeedTune(autoReq, seq: 1);
+        // autoId 的 IsManual 默认为 0
+
+        // 完整快照只含手动行（按其原始源字段）
+        VehicleTuneRequest parsedManual = ParsedTune("TestMaker", "ModelK", surfaceCondition: "干", remarks: "手动行");
+        var (sync, sql) = NewSync();
+        ForzaSyncReport report;
+        using (sql)
+            report = sync.Reconcile([parsedManual], fileId, isCompleteSnapshot: true, actorUserId: 1);
+
+        // 手动行：指纹匹配 → UNCHANGED（不写库）
+        report.Deleted.Should().Be(1, "自动行应被删除");
+
+        // 手动行应保持完整，SourceIdentity 未变
+        using MySQLHelper probeManual = _fixture.CreateHelper();
+        DataRow? manualRow = probeManual.ExecuteDataRow($"SELECT * FROM VehicleTunes WHERE Id = {manualId}");
+        manualRow.Should().NotBeNull("手动行不应被删除");
+        manualRow!["SourceFingerprint"].ToString().Should().Be(manualFingerprint, "手动行 SourceFingerprint 应保持不变");
+        Convert.ToInt32(manualRow["IsManual"]).Should().Be(1, "IsManual 应保持为 1");
+
+        // 自动行应已不存在
+        using MySQLHelper probeAuto = _fixture.CreateHelper();
+        DataRow? countRow = probeAuto.ExecuteDataRow($"SELECT COUNT(*) FROM VehicleTunes WHERE Id = {autoId}");
+        Convert.ToInt32(countRow![0]).Should().Be(0, "IsManual=0 的孪生行在完整快照中缺席时应被删除");
+    }
 }
