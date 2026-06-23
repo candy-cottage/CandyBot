@@ -63,7 +63,7 @@ public class SystemInitializedServiceTests
                 Success: true,
                 PreviousVehicleCount: 0,
                 ParsedVehicleCount: 1,
-                InsertedVehicleCount: 1,
+                InsertedTuneCount: 1,
                 ParsedSheetNames: ["S1-公路"],
                 SkippedSheetNames: [],
                 SkippedRows: [],

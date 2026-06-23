@@ -1,8 +1,8 @@
 using CandyCottage.CandyBot.Interfaces;
 using CandyCottage.CandyBot.Models;
 using CandyCottage.CandyBot.Services.BotServices;
+using CandyCottage.CandyBot.Utilities;
 using Milimoe.FunGame.Core.Api.Transmittal;
-using Milimoe.FunGame.Core.Library.Constant;
 
 namespace CandyCottage.CandyBot.Services;
 
@@ -10,24 +10,33 @@ public sealed class ForzaSheetImporter(
     ILogger<ForzaSheetImporter> logger,
     SheetService sheetService,
     SQLHelper sql,
-    ForzaService forzaService,
+    ForzaSyncService forzaSyncService,
     ISheetParseDiagnostic diagnostic) : IForzaSheetImporter
 {
     public async Task<ForzaSheetSyncReport> SyncAsync(string fileId, CancellationToken cancellationToken = default)
     {
         Dictionary<string, List<List<string>>> sheets = await sheetService.GetSheetDataAsync(fileId);
-        return await SyncLoadedSheetsAsync(sheets, cancellationToken);
+        return await SyncLoadedSheetsAsync(sheets, fileId, cancellationToken: cancellationToken);
     }
 
+    /// <summary>
+    /// 解析表格数据并委托 <see cref="ForzaSyncService.Reconcile"/> 进行按来源协调写库。
+    /// 不再直接操作 Vehicles 表，不做全表清空（修复多 DocsID 互相覆盖数据丢失 bug）。
+    /// </summary>
     internal async Task<ForzaSheetSyncReport> SyncLoadedSheetsAsync(
         Dictionary<string, List<List<string>>> sheets,
+        string fileId = "",
+        long actorUserId = 0,
         CancellationToken cancellationToken = default)
     {
-        List<VehicleRequest> vehicles = [];
+        List<VehicleTuneRequest> tunes = [];
         List<VehicleSheetSkippedRow> skippedRows = [];
-        List<string> parsedSheetNames = [];
+        List<string> parsedClassSheets = [];
+        List<string> skippedClassSheets = [];
+        List<string> emptyClassSheets = [];
         List<string> skippedSheetNames = [];
         List<string> diagnostics = [];
+        int diagnosticFailureCount = 0;
 
         foreach ((string sheetName, List<List<string>> grid) in sheets)
         {
@@ -37,79 +46,115 @@ public sealed class ForzaSheetImporter(
                 continue;
             }
 
+            // 没有表头对 → 跳过；若是班级 sheet 则尝试诊断（可能是格式问题）
             if (!VehicleSheetParser.ContainsHeaderPairInGrid(grid))
             {
                 skippedSheetNames.Add(sheetName);
                 if (LooksLikeForzaClassSheet(sheetName))
                 {
+                    skippedClassSheets.Add(sheetName);
                     string diagnosis = await TryDiagnoseAsync(sheetName, grid, cancellationToken);
-                    if (!string.IsNullOrWhiteSpace(diagnosis)) diagnostics.Add($"{sheetName}: {diagnosis}");
+                    if (!string.IsNullOrWhiteSpace(diagnosis))
+                    {
+                        diagnostics.Add($"{sheetName}: {diagnosis}");
+                        diagnosticFailureCount++;
+                    }
                 }
                 continue;
             }
 
             VehicleSheetParseResult result = VehicleSheetParser.Parse(sheetName, grid);
+            skippedRows.AddRange(result.SkippedRows);
+
             if (result.Vehicles.Count > 0)
             {
-                parsedSheetNames.Add(sheetName);
-                vehicles.AddRange(result.Vehicles);
+                if (LooksLikeForzaClassSheet(sheetName))
+                    parsedClassSheets.Add(sheetName);
+
+                // VehicleRequest → VehicleTuneRequest 映射
+                foreach (VehicleRequest v in result.Vehicles)
+                {
+                    tunes.Add(MapToTuneRequest(v, fileId, sheetName));
+                }
             }
             else
             {
                 skippedSheetNames.Add(sheetName);
                 if (LooksLikeForzaClassSheet(sheetName))
                 {
+                    emptyClassSheets.Add(sheetName);
                     string diagnosis = await TryDiagnoseAsync(sheetName, grid, cancellationToken);
-                    if (!string.IsNullOrWhiteSpace(diagnosis)) diagnostics.Add($"{sheetName}: {diagnosis}");
+                    if (!string.IsNullOrWhiteSpace(diagnosis))
+                    {
+                        diagnostics.Add($"{sheetName}: {diagnosis}");
+                        diagnosticFailureCount++;
+                    }
                 }
             }
-            skippedRows.AddRange(result.SkippedRows);
         }
 
         int previousCount = CountVehicles();
-        if (vehicles.Count == 0)
+
+        // 零解析守卫：拒绝协调，不调用 Reconcile
+        if (tunes.Count == 0)
         {
-            return new(false, previousCount, 0, 0, parsedSheetNames, skippedSheetNames, skippedRows, diagnostics, "解析结果为 0，已拒绝覆盖 Vehicles 旧数据。");
+            return new(false, previousCount, 0, 0, parsedClassSheets, skippedSheetNames, skippedRows, diagnostics,
+                "解析结果为 0，已拒绝覆盖旧数据。");
         }
 
-        try
-        {
-            sql.NewTransaction();
-            sql.Execute("DELETE FROM Vehicles");
-            // SQLHelper.Success 仅在受影响行数 > 0 时为 true：对空表执行 DELETE 会得到 0 行、被判为 Fail。
-            // 真正的执行失败只会把 Result 置为 SQLError（抛了异常），因此这里以 SQLError 作为失败判据。
-            if (sql.Result == SQLResult.SQLError)
-            {
-                sql.Rollback();
-                return new(false, previousCount, vehicles.Count, 0, parsedSheetNames, skippedSheetNames, skippedRows, diagnostics, "清空 Vehicles 失败，旧数据已保留。");
-            }
+        bool complete = ForzaTuneIdentity.IsCompleteSnapshot(
+            parsedClassSheets, skippedClassSheets, emptyClassSheets, diagnosticFailureCount);
 
-            int inserted = 0;
-            foreach (VehicleRequest vehicle in vehicles)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!forzaService.InsertVehicle(vehicle, out string error))
-                {
-                    sql.Rollback();
-                    return new(false, previousCount, vehicles.Count, inserted, parsedSheetNames, skippedSheetNames, skippedRows, diagnostics, $"写入车辆失败：{error}");
-                }
-                inserted++;
-            }
+        ForzaSyncReport rec = forzaSyncService.Reconcile(tunes, fileId, complete, actorUserId);
 
-            sql.Commit();
-            return new(true, previousCount, vehicles.Count, inserted, parsedSheetNames, skippedSheetNames, skippedRows, diagnostics, null);
-        }
-        catch (Exception ex)
+        if (rec.ErrorMessage is not null)
         {
-            logger.LogError(ex, "同步 Forza 车辆表失败");
-            sql.Rollback();
-            return new(false, previousCount, vehicles.Count, 0, parsedSheetNames, skippedSheetNames, skippedRows, diagnostics, $"同步异常：{ex.Message}");
+            logger.LogError("Forza 同步协调失败（fileId={FileId}）：{Error}", fileId, rec.ErrorMessage);
+            return new(false, previousCount, tunes.Count, 0,
+                parsedClassSheets, skippedSheetNames, skippedRows, diagnostics, rec.ErrorMessage,
+                ParsedTuneCount: rec.ParsedCount);
         }
-        finally
-        {
-            sql.Rollback();
-        }
+
+        return new(true, previousCount, tunes.Count, rec.Inserted,
+            parsedClassSheets, skippedSheetNames, skippedRows, diagnostics, null,
+            ParsedTuneCount: rec.ParsedCount,
+            UpdatedInPlaceCount: rec.UpdatedInPlace,
+            CachedCount: rec.Cached,
+            ExpiredCount: rec.Expired,
+            DeletedTuneCount: rec.Deleted);
     }
+
+    /// <summary>
+    /// 将 VehicleSheetParser 解析出的 VehicleRequest 映射为 VehicleTuneRequest，
+    /// 供 ForzaSyncService.Reconcile 使用。来源字段（SourceFileId/SourceSheet 等）
+    /// 在映射阶段填入；VehicleId 由 Reconcile Phase 1（EnsureVehicleModel）回填。
+    /// </summary>
+    private static VehicleTuneRequest MapToTuneRequest(VehicleRequest v, string fileId, string sheetName) => new()
+    {
+        Manufacturer = v.Manufacturer,
+        Model = v.Model,
+        Year = v.Year,
+        Class = v.Class,
+        MatchType = v.MatchType,
+        Drivetrain = v.Drivetrain,
+        PerformancePreference = v.Attribute,   // VehicleRequest.Attribute → PerformancePreference
+        TireCompound = v.TireCompound,
+        SurfaceCondition = v.SurfaceCondition,
+        Strength = v.Strength,
+        TuneRaw = v.Tune,                      // VehicleRequest.Tune → TuneRaw
+        Remarks = v.Remarks,
+        LapTime = v.LapTime,
+        ExtData = v.ExtData,
+        // 来源元数据
+        SourceFileId = fileId,
+        SourceSheet = sheetName,
+        SourceRow = null,
+        SourceDisplayName = null,
+        // 同步行默认值（Reconcile 会覆写 TuneStatus/IsManual/LastUpdatedUserId）
+        IsManual = false,
+        TuneStatus = null,
+        VehicleId = null,
+    };
 
     private int CountVehicles()
     {

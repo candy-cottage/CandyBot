@@ -57,7 +57,7 @@ namespace CandyCottage.CandyBot.Services.SystemServices
                 {
                     md.Content =
                         $"**文件：{fileId}**\r\n" +
-                        $"✅ 已同步 {report.InsertedVehicleCount} 辆车辆。\r\n" +
+                        $"✅ 已同步 {report.InsertedTuneCount} 辆车辆。\r\n" +
                         $"原表：{report.PreviousVehicleCount} 辆；解析：{report.ParsedVehicleCount} 辆；工作表：{report.ParsedSheetNames.Count} 张。\r\n" +
                         $"跳过工作表：{report.SkippedSheetNames.Count} 张；跳过行：{report.SkippedRows.Count} 行。" +
                         (report.Diagnostics.Count > 0 ? "\r\n诊断：" + string.Join("\r\n", report.Diagnostics.Take(3)) : "");
