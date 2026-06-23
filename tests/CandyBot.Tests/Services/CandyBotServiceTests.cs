@@ -343,4 +343,117 @@ public class CandyBotServiceTests
         await queue.DidNotReceive().QueueAsync(Arg.Any<Func<CancellationToken, Task>>());
         sender.TextContents.Single().Should().Contain("不支持指定表格ID");
     }
+
+    // ---- Handler: 新增车型/新增调校/新增车辆 路由与权限测试 -------------------
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_新增车型_非管理员被拒绝()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        // 非管理员（isAdmin=false, isOperator=false）触发 CheckUser(e, user, false) 失败
+        C2CMessage e = TestData.CreateMessage("新增车型 制造商=法拉利 型号=F40");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue("处理器应消费该指令");
+        sender.TextContents.Should().ContainSingle().Which.Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_新增车型_空参数回复用法提示()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        // 空参数时应在权限通过后立即回复格式说明，不触碰 forzaService（forzaService=null!）
+        C2CMessage e = TestData.CreateMessage("新增车型");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Single().Should().Contain("格式：新增车型");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_新增调校_非管理员被拒绝()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("新增调校 车辆=1 等级=S1 比赛类型=公路 驱动=四驱");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Should().ContainSingle().Which.Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_新增调校_空参数回复用法提示()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("新增调校");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Single().Should().Contain("格式：新增调校");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_新增车型前缀先于新增车辆匹配()
+    {
+        // 验证前缀顺序：「新增车型」必须在「新增车辆」之前匹配，否则「新增车型」会被「新增车辆」截断
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        // 发「新增车型」空参数——若路由正确应回复「格式：新增车型」；
+        // 若被「新增车辆」截断则会回复「格式：新增车辆」
+        C2CMessage e = TestData.CreateMessage("新增车型");
+        await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        sender.TextContents.Single().Should().Contain("格式：新增车型",
+            "「新增车型」应在「新增车辆」之前被独立匹配");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_新增调校前缀先于新增车辆匹配()
+    {
+        // 验证前缀顺序：「新增调校」必须在「新增车辆」之前匹配
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("新增调校");
+        await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        sender.TextContents.Single().Should().Contain("格式：新增调校",
+            "「新增调校」应在「新增车辆」之前被独立匹配");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_新增车辆兼容别名_非管理员被拒绝()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("新增车辆 制造商=BMW 型号=M5 等级=S1 比赛类型=公路 驱动=后驱");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: false));
+
+        handled.Should().BeTrue();
+        sender.TextContents.Should().ContainSingle().Which.Should().Be("你没有权限执行此操作。");
+    }
+
+    [Fact]
+    public async Task HandleForzaHorizonInput_新增车辆兼容别名_空参数回复包含格式说明()
+    {
+        RecordingBotReplySender sender = new();
+        CandyBotService svc = CreateService(sender, AllOn(), ForzaSheets());
+
+        C2CMessage e = TestData.CreateMessage("新增车辆");
+        bool handled = await svc.HandleForzaHorizonInput(e, TestData.CreateUser(isAdmin: true));
+
+        handled.Should().BeTrue();
+        // 兼容别名的空参数提示应包含新路径的格式说明
+        sender.TextContents.Single().Should().Contain("格式：新增车辆");
+    }
 }
