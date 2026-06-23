@@ -513,6 +513,83 @@ namespace CandyCottage.CandyBot.Services
             }
         }
 
+        /// <summary>
+        /// 手动新增一条调校（人手维护）。
+        /// req.VehicleId 必填且必须已存在；Class/MatchType/Drivetrain 必填。
+        /// 手动调校无来源：SourceFileId=""，SourceIdentity="" — InsertTune 按此处理；
+        /// 用全局 seq 在 ('','') 槽内消歧，避免 uq_source_identity 冲突。
+        /// </summary>
+        /// <returns>新行的 TuneId；失败返回 0 并通过 error 输出错误描述。</returns>
+        public int AddTune(VehicleTuneRequest request, long actorUserId, out string error)
+        {
+            error = "";
+
+            // 校验必填字段
+            if (request.VehicleId == null || request.VehicleId == 0)
+            {
+                error = "车辆ID不能为空。";
+                return 0;
+            }
+            if (string.IsNullOrWhiteSpace(request.Class))
+            {
+                error = "等级不能为空。";
+                return 0;
+            }
+            if (string.IsNullOrWhiteSpace(request.MatchType))
+            {
+                error = "比赛类型不能为空。";
+                return 0;
+            }
+            if (string.IsNullOrWhiteSpace(request.Drivetrain))
+            {
+                error = "驱动类型不能为空。";
+                return 0;
+            }
+
+            try
+            {
+                // 校验 VehicleId 存在
+                sql.Parameters["@vehicleIdCheck"] = request.VehicleId.Value;
+                DataRow? vehicleRow = sql.ExecuteDataRow("SELECT 1 FROM Vehicles WHERE Id = @vehicleIdCheck");
+                if (!sql.Success || vehicleRow == null)
+                {
+                    error = $"车辆ID {request.VehicleId.Value} 不存在，请先使用\"新增车型\"创建车型。";
+                    return 0;
+                }
+
+                // 手动路径：SourceFileId=""，IsManual=true
+                request.SourceFileId = "";
+                request.IsManual = true;
+                request.LastUpdatedUserId = actorUserId;
+
+                // 计算手动调校的 seq（在 SourceFileId='', SourceIdentity='' 槽内全局递增）
+                DataRow? seqRow = sql.ExecuteDataRow(
+                    "SELECT COALESCE(MAX(SourceIdentitySeq), -1) FROM VehicleTunes WHERE SourceFileId = '' AND SourceIdentity = ''");
+                int seq = 0;
+                if (sql.Success && seqRow != null)
+                {
+                    seq = Convert.ToInt32(seqRow[0]) + 1;
+                }
+
+                sql.NewTransaction();
+                int tuneId = InsertTune(request, seq, out error);
+                if (tuneId == 0)
+                    return 0;
+                sql.Commit();
+                return tuneId;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "AddTune error: {Message}", ex.Message);
+                error = $"新增调校异常：{ex.Message}";
+                return 0;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
         public bool AddVehicle(VehicleRequest request, out string error)
         {
             error = "";
