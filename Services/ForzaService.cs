@@ -50,12 +50,6 @@ namespace CandyCottage.CandyBot.Services
             return (true, "success", dt, totalPages);
         }
 
-        public (bool success, string message, DataTable? data, int totalPages) GetVehicleById(int id)
-        {
-            sql.Parameters["@id"] = id;
-            return GetVehicleDataTable("WHERE Id = @id", 1, 1);
-        }
-
         // ==================== 车型 CRUD（Task 7：ModelKey 唯一，确定性返回 VehicleId） ====================
 
         /// <summary>
@@ -430,89 +424,6 @@ namespace CandyCottage.CandyBot.Services
             return ExecuteVehicleQuery(whereClause, page, out totalPages);
         }
 
-        public bool UpdateVehicle(VehicleRequest request, out string error)
-        {
-            error = "";
-            if (sql == null)
-            {
-                error = "数据库连接失败。";
-                return false;
-            }
-
-            try
-            {
-                sql.NewTransaction();
-
-                // ----- 定位车辆 -----
-                int vehicleId = 0;
-                if (request.Id.HasValue && request.Id.Value > 0)
-                {
-                    sql.Parameters["@id"] = request.Id.Value;
-                    sql.ExecuteDataSetForUpdate("SELECT Id FROM Vehicles WHERE Id = @id");
-                }
-                else
-                {
-                    error = "请提供车辆ID以定位车辆。";
-                    return false;
-                }
-
-                if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
-                {
-                    error = "未找到对应的车辆。请检查定位条件是否正确。";
-                    return false;
-                }
-
-                vehicleId = Convert.ToInt32(sql.DataSet.Tables[0].Rows[0]["Id"]);
-
-                // ----- 构建 UPDATE 语句 -----
-                List<string> setClauses = [];
-                AddSetClause(setClauses, "Manufacturer", request.Manufacturer);
-                AddSetClause(setClauses, "Model", request.Model);
-                AddSetClause(setClauses, "Year", request.Year);
-                AddSetClause(setClauses, "Class", request.Class);
-                AddSetClause(setClauses, "MatchType", request.MatchType);
-                AddSetClause(setClauses, "Drivetrain", request.Drivetrain);
-                AddSetClause(setClauses, "Attribute", request.Attribute);
-                AddSetClause(setClauses, "TireCompound", request.TireCompound);
-                AddSetClause(setClauses, "SurfaceCondition", request.SurfaceCondition);
-                AddSetClause(setClauses, "Strength", request.Strength);
-                AddSetClause(setClauses, "Tune", request.Tune);
-                AddSetClause(setClauses, "Remarks", request.Remarks);
-                AddSetClause(setClauses, "LapTime", request.LapTime);
-                AddSetClause(setClauses, "ExtData", request.ExtData);
-
-                if (setClauses.Count == 0)
-                {
-                    error = "没有提供任何修改参数。";
-                    return false;
-                }
-
-                string updateSql = $"UPDATE Vehicles SET {string.Join(", ", setClauses)} WHERE Id = @id";
-                sql.Parameters["@id"] = vehicleId;
-                sql.Execute(updateSql);
-                if (!sql.Success)
-                {
-                    error = "更新车辆信息失败。";
-                    return false;
-                }
-
-                sql.Commit();
-                // 制造商可能被改名，失效缓存
-                forzaConfig.Invalidate();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error: {Message}", ex.Message);
-                error = $"修改车辆异常：{ex.Message}";
-                return false;
-            }
-            finally
-            {
-                sql.Rollback();
-            }
-        }
-
         /// <summary>
         /// 手动新增一条调校（人手维护）。
         /// req.VehicleId 必填且必须已存在；Class/MatchType/Drivetrain 必填。
@@ -587,106 +498,6 @@ namespace CandyCottage.CandyBot.Services
             finally
             {
                 sql.Rollback();
-            }
-        }
-
-        public bool AddVehicle(VehicleRequest request, out string error)
-        {
-            error = "";
-
-            // 校验必填字段
-            if (request.Manufacturer is null)
-            {
-                error = "制造商不能为空。";
-                return false;
-            }
-            if (request.Model is null)
-            {
-                error = "型号不能为空。";
-                return false;
-            }
-            if (request.Class is null)
-            {
-                error = "等级不能为空。";
-                return false;
-            }
-            if (request.MatchType is null)
-            {
-                error = "比赛类型不能为空。";
-                return false;
-            }
-            if (request.Drivetrain is null)
-            {
-                error = "驱动类型不能为空。";
-                return false;
-            }
-
-            try
-            {
-                sql.NewTransaction();
-                if (!InsertVehicle(request, out error))
-                {
-                    return false;
-                }
-                sql.Commit();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "AddVehicle error: {Message}", ex.Message);
-                error = $"新增车辆异常：{ex.Message}";
-                return false;
-            }
-            finally
-            {
-                sql.Rollback();
-            }
-        }
-
-        /// <summary>
-        /// 构建并执行单条车辆 INSERT，<b>不开启自身事务</b>——由调用方负责事务边界
-        /// （commit / rollback）。这使得导入器可以在一个外层事务内 DELETE + 循环插入 N 辆车，
-        /// 任一失败即整体回滚。<c>AddVehicle</c> 在校验必填字段后包一层事务委托至此。
-        /// </summary>
-        /// <remarks>internal 仅为便于集成测试直接验证「外层事务可回滚本插入」（见 InternalsVisibleTo）。</remarks>
-        internal bool InsertVehicle(VehicleRequest request, out string error)
-        {
-            error = "";
-            try
-            {
-                List<string> columns = [];
-                List<string> values = [];
-                AddField(columns, values, "Manufacturer", request.Manufacturer);
-                AddField(columns, values, "Model", request.Model);
-                AddField(columns, values, "Year", request.Year);
-                AddField(columns, values, "Class", request.Class);
-                AddField(columns, values, "MatchType", request.MatchType);
-                AddField(columns, values, "Drivetrain", request.Drivetrain);
-                AddField(columns, values, "Attribute", request.Attribute);
-                AddField(columns, values, "TireCompound", request.TireCompound);
-                AddField(columns, values, "SurfaceCondition", request.SurfaceCondition);
-                AddField(columns, values, "Strength", request.Strength);
-                AddField(columns, values, "Tune", request.Tune);
-                AddField(columns, values, "Remarks", request.Remarks);
-                AddField(columns, values, "LapTime", request.LapTime);
-                AddField(columns, values, "ExtData", request.ExtData);
-
-                string insertSql = $"INSERT INTO Vehicles ({string.Join(", ", columns)}) VALUES ({string.Join(", ", values)})";
-                sql.Execute(insertSql);
-                if (!sql.Success)
-                {
-                    error = "新增车辆失败，请稍后重试。";
-                    return false;
-                }
-                // 可能引入新制造商，失效缓存（清空总是安全的，最坏只是下次搜索多一次 DISTINCT 查询）
-                forzaConfig.Invalidate();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "InsertVehicle error: {Message}", ex.Message);
-                error = $"新增车辆异常：{ex.Message}";
-                return false;
             }
         }
 

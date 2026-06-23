@@ -348,7 +348,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         // 确认该行已不存在
         using MySQLHelper probe = _fixture.CreateHelper();
         ForzaService probeSvc = new(NullLogger<ForzaService>.Instance, probe, _forzaConfig);
-        var (s2, _, data, _) = probeSvc.GetVehicleById(id);
+        var (s2, _, data, _) = probeSvc.GetVehicleModelById(id);
         // success=true 但 data 为空（查询本身成功，但无行）
         (s2 == false || data == null || data.Rows.Count == 0).Should().BeTrue("已删除的车辆不应再被查到");
     }
@@ -709,7 +709,7 @@ public class ForzaServiceTests(MySqlFixture fixture)
         using MySQLHelper sql = _fixture.CreateHelper();
         ForzaService svc = new(NullLogger<ForzaService>.Instance, sql, _forzaConfig);
 
-        var (success, _, data, totalPages) = svc.GetVehicleById(999999);
+        var (success, _, data, totalPages) = svc.GetVehicleModelById(999999);
 
         // 查询本身执行成功，但无匹配行（success=true, Rows.Count=0, totalPages=0）
         (success == false || data == null || data.Rows.Count == 0).Should().BeTrue(
