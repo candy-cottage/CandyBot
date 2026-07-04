@@ -433,6 +433,11 @@ namespace CandyCottage.CandyBot.Services.SystemServices
         ///   <item>用 <c>PluginConfig("forza","schema")["version"]</c> 标记是否已完成；值为 "2" 则幂等返回。</item>
         ///   <item>旧表特征列：<c>Tune</c>（无 <c>ModelKey</c>）。</item>
         ///   <item>DDL（RENAME/CREATE）不可被事务回滚；回填 DML 通过 <see cref="ExecuteOrThrow"/> 保证非静默失败。</item>
+        ///   <item>
+        ///     DDL 顺序契约：必须先 RENAME 旧表、再建新 <c>Vehicles</c>、最后建子表——
+        ///     MySQL 外键绑定物理表并跟随 RENAME，顺序颠倒会让 <c>fk_tune_vehicle</c>
+        ///     误指向 <c>Vehicles_legacy_v1</c>；存量误绑由 <see cref="RepairTuneForeignKeyIfMisbound"/> 修复。
+        ///   </item>
         ///   <item>车型按 <see cref="ForzaTuneIdentity.BuildModelKey"/> 去重；Id 通过 SELECT 回读而非信任 LAST_INSERT_ID。</item>
         ///   <item>
         ///     replay 守护：<c>Vehicles_legacy_v1</c> 存在即意味着迁移 DDL 已执行，
@@ -454,30 +459,33 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             if ((schemaVerCfg.Get<string>("version") ?? "") == "2")
                 return;
 
-            // 前置守卫3：Vehicles 表不存在说明尚未系统初始化；新建表由 forza.sql 负责，此处直接返回
-            if (!MySqlTableExists("Vehicles"))
+            bool vehiclesExists = MySqlTableExists("Vehicles");
+            bool legacyBackupExists = MySqlTableExists("Vehicles_legacy_v1");
+
+            // 前置守卫3：两表均不存在说明尚未系统初始化；新建表由 forza.sql 负责，此处直接返回。
+            //（仅 Vehicles 不存在而 backup 在，属于"RENAME 后建新表前中断"，须继续走恢复路径。）
+            if (!vehiclesExists && !legacyBackupExists)
                 return;
 
-            bool legacyShape = MySqlColumnExists("Vehicles", "Tune");
-            bool legacyBackupExists = MySqlTableExists("Vehicles_legacy_v1");
+            bool legacyShape = vehiclesExists && MySqlColumnExists("Vehicles", "Tune");
+
+            // 旧结构 Vehicles 与 backup 并存：正常迁移流程产生不了该状态（RENAME 后旧表即消失），
+            // 只能是人工恢复过旧表——无法判定哪份是真相，拒绝自动处理
+            if (legacyShape && legacyBackupExists)
+                throw new InvalidOperationException(
+                    "旧结构 Vehicles 与 Vehicles_legacy_v1 同时存在，无法判定迁移状态，请人工清理其中一份后重启。");
 
             if (legacyShape)
             {
-                // ── 路径A：旧合并表仍在 Vehicles 上，执行完整 DDL 迁移步骤 ──
-
-                // Step A：建子表（CREATE IF NOT EXISTS，DDL 不可回滚，但幂等安全）
-                ExecuteSchemaStatement(VehicleTunesDdl);
-                ExecuteSchemaStatement(VehicleTuneCacheDdl);
-
-                // Step B：RENAME 旧合并表（DDL，隐式提交，不可回滚）
-                if (!legacyBackupExists)
-                    ExecuteSchemaStatement("RENAME TABLE `Vehicles` TO `Vehicles_legacy_v1`");
-
-                // Step C：建新 Vehicles 车型主表
-                if (!MySqlTableExists("Vehicles"))
-                    ExecuteSchemaStatement(VehiclesDdl);
+                // ── 路径A：旧合并表仍在 Vehicles 上 ──
+                // Step A：RENAME 旧合并表（DDL，隐式提交，不可回滚）。
+                // 必须发生在建子表之前：MySQL 外键绑定物理表并跟随 RENAME，
+                // 若先建 VehicleTunes，fk_tune_vehicle 会随旧表改名误指向 Vehicles_legacy_v1（PR #22 事故）
+                ExecuteSchemaStatement("RENAME TABLE `Vehicles` TO `Vehicles_legacy_v1`");
+                legacyBackupExists = true;
             }
-            else if (!legacyBackupExists)
+
+            if (!legacyBackupExists)
             {
                 // ── 路径B：既无旧合并表，backup 也不存在 ──
                 // 若无 ModelKey 则为半建状态，补建子表
@@ -492,9 +500,17 @@ namespace CandyCottage.CandyBot.Services.SystemServices
                 logger.LogInformation("Forza schema 升级至 v2（新装或无旧数据，无需回填）");
                 return;
             }
-            // else：legacyShape==false && legacyBackupExists：DDL 已执行过，进入回填校验路径
 
-            // ── 共用回填路径：legacy_v1 存在时（路径A/路径C），检查并按需重灌 VehicleTunes ──
+            // ── 共用回填路径：legacy_v1 已存在（路径A 或历史中断后的重放），检查并按需重灌 VehicleTunes ──
+
+            // Step B：确保新表齐备（CREATE IF NOT EXISTS 幂等）。先建父表 Vehicles 再建子表，
+            // 使新建的 fk_tune_vehicle 绑定到新车型主表
+            ExecuteSchemaStatement(VehiclesDdl);
+            ExecuteSchemaStatement(VehicleTunesDdl);
+            ExecuteSchemaStatement(VehicleTuneCacheDdl);
+
+            // Step C：存量外键误绑修复（历史版本 DDL 顺序缺陷遗留的库）
+            RepairTuneForeignKeyIfMisbound();
 
             // Step D：读取旧合并表所有行
             DataSet legacyDs = sql.ExecuteDataSet("SELECT * FROM `Vehicles_legacy_v1`");
@@ -598,6 +614,50 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             schemaVerCfg.Add("version", "2");
             schemaVerCfg.SaveConfig();
             logger.LogInformation("Forza schema 已升级至 v2（Vehicles/VehicleTunes/VehicleTuneCache 三表结构）");
+        }
+
+        /// <summary>
+        /// 存量修复：历史版本的迁移 DDL 顺序缺陷（先建 VehicleTunes 再 RENAME 旧表）会让
+        /// <c>fk_tune_vehicle</c> 跟随改名误指向 <c>Vehicles_legacy_v1</c>，导致回填插入外键违规。
+        ///
+        /// <para>检测 <c>information_schema</c> 中外键的实际引用表（大小写不敏感，兼容
+        /// lower_case_table_names=1 的 Windows MySQL）：</para>
+        /// <list type="bullet">
+        ///   <item>引用已是 <c>Vehicles</c>（或外键不存在）：不动作。</item>
+        ///   <item>误绑且表内只有迁移哨兵行（SourceFileId='migration'）：删外键 → 清空迁移行 →
+        ///     重建指向新 <c>Vehicles</c> 的外键；随后由回填重放补数。</item>
+        ///   <item>误绑但存在任何非迁移调校：拒绝自动删数据，抛出异常交由管理员人工决策。</item>
+        /// </list>
+        /// </summary>
+        private void RepairTuneForeignKeyIfMisbound()
+        {
+            DataRow? fkRow = sql.ExecuteDataRow(@"SELECT REFERENCED_TABLE_NAME AS ref_table
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'VehicleTunes'
+                  AND CONSTRAINT_NAME = 'fk_tune_vehicle' AND REFERENCED_TABLE_NAME IS NOT NULL");
+            if (sql.Result == SQLResult.SQLError)
+                throw sql.LastException ?? new InvalidOperationException("读取 fk_tune_vehicle 外键信息失败");
+
+            string refTable = fkRow?["ref_table"]?.ToString() ?? "";
+            if (refTable.Length == 0 || refTable.Equals("Vehicles", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            DataRow? nonMigRow = sql.ExecuteDataRow(
+                "SELECT COUNT(*) AS c FROM `VehicleTunes` WHERE SourceFileId <> 'migration'");
+            if (sql.Result == SQLResult.SQLError)
+                throw sql.LastException ?? new InvalidOperationException("读取 VehicleTunes 非迁移行数失败");
+            int nonMigCount = nonMigRow is not null ? Convert.ToInt32(nonMigRow["c"]) : 0;
+            if (nonMigCount > 0)
+                throw new InvalidOperationException(
+                    $"检测到 fk_tune_vehicle 外键误指向 {refTable}，且 VehicleTunes 中存在 {nonMigCount} 条非迁移调校，" +
+                    "为避免误删数据不做自动修复。请人工备份 VehicleTunes 后，将该外键重建为 REFERENCES Vehicles(Id) 再重启。");
+
+            logger.LogWarning("检测到 fk_tune_vehicle 外键误指向 {RefTable}（历史迁移顺序缺陷），表内仅迁移行，开始自动修复", refTable);
+            ExecuteSchemaStatement("ALTER TABLE `VehicleTunes` DROP FOREIGN KEY `fk_tune_vehicle`");
+            ExecuteOrThrow("DELETE FROM `VehicleTunes` WHERE SourceFileId = 'migration'");
+            ExecuteSchemaStatement(@"ALTER TABLE `VehicleTunes`
+                ADD CONSTRAINT `fk_tune_vehicle` FOREIGN KEY (`VehicleId`) REFERENCES `Vehicles`(`Id`) ON DELETE CASCADE");
+            logger.LogInformation("fk_tune_vehicle 已重建为引用新 Vehicles 车型主表，迁移行将由回填重放补数");
         }
 
         /// <summary>
