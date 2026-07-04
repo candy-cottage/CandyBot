@@ -50,4 +50,45 @@
         public string? MinimapUrl { get; set; }
         public string? Notes { get; set; }
     }
+
+    /// <summary>
+    /// 车型请求模型
+    /// </summary>
+    public class VehicleModelRequest
+    {
+        public int? Id { get; set; }
+        public string? Manufacturer { get; set; }
+        public string? Model { get; set; }
+        public string? Year { get; set; }
+    }
+
+    /// <summary>
+    /// 调校请求模型（含车型字段以支持同步）
+    /// </summary>
+    public class VehicleTuneRequest
+    {
+        public int? Id { get; set; }
+        public int? VehicleId { get; set; }
+        public string? Manufacturer { get; set; }
+        public string? Model { get; set; }
+        public string? Year { get; set; }
+        public string? Class { get; set; }
+        public string? MatchType { get; set; }
+        public string? Drivetrain { get; set; }
+        public string? PerformancePreference { get; set; }
+        public string? TireCompound { get; set; }
+        public string? SurfaceCondition { get; set; }
+        public string? Strength { get; set; }
+        public string? TuneRaw { get; set; }
+        public string? Remarks { get; set; }
+        public string? LapTime { get; set; }
+        public string? ExtData { get; set; }
+        public string? SourceFileId { get; set; }
+        public string? SourceSheet { get; set; }
+        public int? SourceRow { get; set; }
+        public string? SourceDisplayName { get; set; }
+        public bool IsManual { get; set; }
+        public string? TuneStatus { get; set; }
+        public long LastUpdatedUserId { get; set; }
+    }
 }

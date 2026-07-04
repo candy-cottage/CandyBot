@@ -26,6 +26,7 @@ namespace CandyCottage.CandyBot.Services.SystemServices
                 SQLTableInitializeService sqlInitService = scope.ServiceProvider.GetRequiredService<SQLTableInitializeService>();
                 sqlInitService.EnsureBettingAutomationSchema();
                 sqlInitService.EnsureForzaMapSchema();
+                sqlInitService.EnsureForzaTuneSchema();
             }
             logger.LogInformation("加载 FunGame 模组 . . .");
             characterModule.Load();

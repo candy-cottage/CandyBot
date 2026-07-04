@@ -47,11 +47,20 @@ public sealed class MySqlFixture : IAsyncLifetime
     /// <summary>四个建表脚本的执行顺序（fungame 必须最先，因为 betting 的外键引用它建立的库）。</summary>
     private static readonly string[] ScriptOrder = ["fungame.sql", "betting.sql", "candybot.sql", "forza.sql"];
 
-    /// <summary>已加载完整 schema 的共享库中的数据表，<see cref="ResetDataAsync"/> 会逐一 TRUNCATE。</summary>
+    /// <summary>
+    /// 已加载完整 schema 的共享库中的数据表，<see cref="ResetDataAsync"/> 会逐一 TRUNCATE。
+    /// <para>
+    /// 注意：<c>TRUNCATE</c> <b>不会</b>触发 <c>ON DELETE CASCADE</c>（CASCADE 仅在 <c>DELETE</c> 语句时触发），
+    /// 因此子表 <c>VehicleTunes</c>、<c>VehicleTuneCache</c> 必须在此独立列出，否则父表
+    /// <c>Vehicles</c> 截断后子表行会残留，导致跨测试数据污染。
+    /// <c>FOREIGN_KEY_CHECKS=0</c> 仅用于绕过 TRUNCATE 父表时 MySQL 因 FK 引用而拒绝操作的限制。
+    /// </para>
+    /// </summary>
     private static readonly string[] DataTables =
     [
         "betting_bet_records", "betting_matches", "betting_events",
-        "Vehicles", "ApiTokens", "Users", "Inventories", "NicknameChangeRequests", "Configs",
+        "Vehicles", "VehicleTunes", "VehicleTuneCache",
+        "ApiTokens", "Users", "Inventories", "NicknameChangeRequests", "Configs",
     ];
 
     private readonly MySqlContainer _container = new MySqlBuilder()
@@ -136,8 +145,13 @@ public sealed class MySqlFixture : IAsyncLifetime
     }
 
     /// <summary>
-    /// 关闭外键检查后逐表 TRUNCATE 共享 schema 库的数据表，使会写数据的测试彼此独立。
-    /// 会改数据的测试应在开头 await 一次。
+    /// 关闭外键检查后逐表 TRUNCATE 共享 schema 库中 <see cref="DataTables"/> 列出的所有数据表，
+    /// 使会写数据的测试彼此独立。会改数据的测试应在开头 await 一次。
+    /// <para>
+    /// <c>FOREIGN_KEY_CHECKS=0</c> 仅用于允许 TRUNCATE 父表（如 <c>Vehicles</c>）；
+    /// 子表（<c>VehicleTunes</c>、<c>VehicleTuneCache</c>）必须在 <see cref="DataTables"/> 中独立列出并各自 TRUNCATE，
+    /// 因为 TRUNCATE 不触发 ON DELETE CASCADE。
+    /// </para>
     /// </summary>
     public async Task ResetDataAsync()
     {

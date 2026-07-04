@@ -4,5 +4,5 @@ namespace CandyCottage.CandyBot.Interfaces;
 
 public interface IForzaSheetImporter
 {
-    Task<ForzaSheetSyncReport> SyncAsync(string fileId, CancellationToken cancellationToken = default);
+    Task<ForzaSheetSyncReport> SyncAsync(string fileId, long actorUserId = 0, CancellationToken cancellationToken = default);
 }

@@ -30,7 +30,7 @@ public class SystemInitializedServiceTests
             bool syncStarted = false;
 
             IForzaSheetImporter importer = Substitute.For<IForzaSheetImporter>();
-            importer.SyncAsync(fileId, Arg.Any<CancellationToken>())
+            importer.SyncAsync(fileId, Arg.Any<long>(), Arg.Any<CancellationToken>())
                 .Returns(_ =>
                 {
                     syncStarted = true;
@@ -48,7 +48,7 @@ public class SystemInitializedServiceTests
             {
                 DocsID = { ["ZGC"] = fileId }
             };
-            SystemInitializedService service = new(provider, taskManager, forzaConfig);
+            SystemInitializedService service = new(provider, taskManager, forzaConfig, new CandyBotFunctionConfig { ForzaHorizon = true });
 
             await service.StartAsync(CancellationToken.None);
             var scheduledTask = taskManager.GetScheduledTask("0点同步车辆");
@@ -63,7 +63,7 @@ public class SystemInitializedServiceTests
                 Success: true,
                 PreviousVehicleCount: 0,
                 ParsedVehicleCount: 1,
-                InsertedVehicleCount: 1,
+                InsertedTuneCount: 1,
                 ParsedSheetNames: ["S1-公路"],
                 SkippedSheetNames: [],
                 SkippedRows: [],
@@ -71,6 +71,85 @@ public class SystemInitializedServiceTests
                 ErrorMessage: null));
 
             await actionRun.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            PluginConfig.RootPath = originalRoot;
+            try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task SyncForzaWithDocs_地平线关闭_不执行同步()
+    {
+        string originalRoot = PluginConfig.RootPath;
+        string tmp = Path.Combine(Path.GetTempPath(), "candybot-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            PluginConfig.RootPath = tmp;
+            const string fileId = "forza-doc";
+
+            IForzaSheetImporter importer = Substitute.For<IForzaSheetImporter>();
+
+            ServiceCollection services = new();
+            services.AddScoped(_ => CreateSql());
+            services.AddScoped(_ => Substitute.For<IBotReplySender>());
+            services.AddScoped(_ => importer);
+            await using ServiceProvider provider = services.BuildServiceProvider();
+
+            ForzaConfig forzaConfig = new() { DocsID = { ["ZGC"] = fileId } };
+            CandyBotFunctionConfig functionConfig = new() { ForzaHorizon = false };
+            SystemInitializedService service = new(provider, new TaskSchedulerManager(), forzaConfig, functionConfig);
+
+            await service.SyncForzaWithDocs();
+
+            // 地平线已关闭，SyncAsync 不应被调用
+            await importer.DidNotReceive().SyncAsync(Arg.Any<string>(), Arg.Any<long>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            PluginConfig.RootPath = originalRoot;
+            try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task SyncForzaWithDocs_地平线开启_执行同步()
+    {
+        string originalRoot = PluginConfig.RootPath;
+        string tmp = Path.Combine(Path.GetTempPath(), "candybot-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            PluginConfig.RootPath = tmp;
+            const string fileId = "forza-doc";
+
+            IForzaSheetImporter importer = Substitute.For<IForzaSheetImporter>();
+            importer.SyncAsync(fileId, Arg.Any<long>(), Arg.Any<CancellationToken>())
+                .Returns(new ForzaSheetSyncReport(
+                    Success: true,
+                    PreviousVehicleCount: 0,
+                    ParsedVehicleCount: 1,
+                    InsertedTuneCount: 1,
+                    ParsedSheetNames: ["S1-公路"],
+                    SkippedSheetNames: [],
+                    SkippedRows: [],
+                    Diagnostics: [],
+                    ErrorMessage: null));
+
+            ServiceCollection services = new();
+            services.AddScoped(_ => CreateSql());
+            services.AddScoped(_ => Substitute.For<IBotReplySender>());
+            services.AddScoped(_ => importer);
+            await using ServiceProvider provider = services.BuildServiceProvider();
+
+            ForzaConfig forzaConfig = new() { DocsID = { ["ZGC"] = fileId } };
+            CandyBotFunctionConfig functionConfig = new() { ForzaHorizon = true };
+            SystemInitializedService service = new(provider, new TaskSchedulerManager(), forzaConfig, functionConfig);
+
+            await service.SyncForzaWithDocs();
+
+            // 地平线已开启，SyncAsync 应该被调用一次（对应一个 DocsID）
+            await importer.Received(1).SyncAsync(fileId, Arg.Any<long>(), Arg.Any<CancellationToken>());
         }
         finally
         {

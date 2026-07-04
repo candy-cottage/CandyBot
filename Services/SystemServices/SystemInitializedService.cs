@@ -8,7 +8,7 @@ using Milimoe.FunGame.Core.Library.SQLScript.Common;
 
 namespace CandyCottage.CandyBot.Services.SystemServices
 {
-    public class SystemInitializedService(IServiceProvider serviceProvider, ITaskSchedulerManager taskManager, ForzaConfig forzaConfig) : IHostedService
+    public class SystemInitializedService(IServiceProvider serviceProvider, ITaskSchedulerManager taskManager, ForzaConfig forzaConfig, CandyBotFunctionConfig functionConfig) : IHostedService
     {
         public const string TaskName_0ClockSyncCar = "0点同步车辆";
         public const string TaskName_12ClockSyncCar = "12点同步车辆";
@@ -33,6 +33,12 @@ namespace CandyCottage.CandyBot.Services.SystemServices
 
         public async Task SyncForzaWithDocs()
         {
+            // 地平线模块关闭时跳过计划同步，与消息处理器保持一致
+            if (!functionConfig.ForzaHorizon)
+            {
+                return;
+            }
+
             using IServiceScope scope = serviceProvider.CreateScope();
             IBotReplySender botReplySender = scope.ServiceProvider.GetRequiredService<IBotReplySender>();
             PluginConfig initializationConfig = new("sqlconfig", "initialization");
@@ -44,7 +50,8 @@ namespace CandyCottage.CandyBot.Services.SystemServices
             {
                 string fileId = forzaConfig.DocsID[docsName];
                 IForzaSheetImporter forzaSheetImporter = scope.ServiceProvider.GetRequiredService<IForzaSheetImporter>();
-                ForzaSheetSyncReport report = await forzaSheetImporter.SyncAsync(fileId);
+                // actorUserId: 0 → 系统/计划任务触发，无用户身份
+                ForzaSheetSyncReport report = await forzaSheetImporter.SyncAsync(fileId, actorUserId: 0);
                 MarkdownMessage md = new()
                 {
                     Content = ""
@@ -57,7 +64,7 @@ namespace CandyCottage.CandyBot.Services.SystemServices
                 {
                     md.Content =
                         $"**文件：{fileId}**\r\n" +
-                        $"✅ 已同步 {report.InsertedVehicleCount} 辆车辆。\r\n" +
+                        $"✅ 已同步 {report.InsertedTuneCount} 辆车辆。\r\n" +
                         $"原表：{report.PreviousVehicleCount} 辆；解析：{report.ParsedVehicleCount} 辆；工作表：{report.ParsedSheetNames.Count} 张。\r\n" +
                         $"跳过工作表：{report.SkippedSheetNames.Count} 张；跳过行：{report.SkippedRows.Count} 行。" +
                         (report.Diagnostics.Count > 0 ? "\r\n诊断：" + string.Join("\r\n", report.Diagnostics.Take(3)) : "");

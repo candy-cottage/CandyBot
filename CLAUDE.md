@@ -13,7 +13,7 @@ CandyBot 是一个基于 ASP.NET Core（`net10.0`）的 QQ 官方机器人后端
 | 用户存档系统 | ✅ 已落地 | 创建存档、昵称修改、糖果屋仪表盘 |
 | 电竞赛事预测系统 | ✅ 已落地 | 赛事/比赛查询、投注预测、领奖 |
 | 赛事预测自动化（CS2） | ⚙️ 半自动 | PandaScore 抓取赛程/结果 → 入未发布草稿 → 管理员发布/确认结算；赔率暂缓接入 |
-| 极限竞速：地平线6 | ✅ 已落地 | 查车、查赛道、查等级（数据源于 ZGC 车队调校表格） |
+| 极限竞速：地平线6 | ✅ 已落地 | 查车、查赛道、查等级；车型+调校拆表，按来源(fileId)幂等同步（数据源于 ZGC 车队调校表格） |
 | 经营模拟游戏（糖果屋） | ⚠️ 半成品 | `Entities/` 中有完整实体建模，帮助文本已编写，但业务处理器尚未实现 |
 
 ## 常用命令
@@ -165,8 +165,17 @@ QQBotWebSocketService (BackgroundService)
 - `查赛道 <赛道名> [页码]` —— 搜索赛道信息
 - `查等级 <等级> [比赛类型] [页码]` —— 按等级/比赛类型筛选车辆
 - 所有查询结果带分页键盘（`AddPaginationRow`）
-- `ForzaService` 底层查询 `Vehicles` / `Tracks` / `TrackRecords` 表
+- `ForzaService` 底层使用三张车辆表：**`Vehicles`（车型）/ `VehicleTunes`（调校）/ `VehicleTuneCache`（调校缓存）**；赛道使用 **`Maps` / `MapGroups` / `MapGroupMaps`**（无 Tracks/TrackRecords 表）
+- 数据模型为**车型+调校拆表**：车型记录唯一，调校含 `SourceIdentity`（来源 fileId），通过完整快照闸门按来源幂等同步，替代旧的全表清空重灌
 - HTTP API：`ForzaController` 提供 `/forza/vehicles` GET（匿名）+ POST/PUT/DELETE（admin/op 角色）
+- 管理员指令（需 `地平线` 开关开启）：
+  - `同步车辆表` —— 后台同步所有配置表格，完成后通知触发者
+  - `新增车型 制造商=x 型号=y [年份=z]` / `新增调校 车辆=<VehicleId> ...` —— 手动新增车型或调校
+  - `新增车辆 ...` —— 一次性新增车型并建立调校的别名组合指令
+  - `修改车型 <VehicleId> [字段=值]` / `修改调校 <TuneId> [字段=值]` —— 字段级修改
+  - `删除车型 <VehicleId>`（连带删除其调校）/ `删除调校 <TuneId>`
+  - `待更新调校表 [页码]` / `已过时调校表 [页码]` —— 查看与源表差异
+  - `更新调校 <TuneId>` —— 将缓存调校写入正式记录
 
 #### 赛事预测系统 (`BettingInputHandler` + `BettingService`)
 

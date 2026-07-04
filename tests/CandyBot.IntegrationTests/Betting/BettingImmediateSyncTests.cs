@@ -94,7 +94,8 @@ public class BettingImmediateSyncTests(MySqlFixture fixture)
                 new BettingService(sql, cfg),
                 provider,
                 new PandaScoreConfig { GameSlug = "csgo" }),
-            userAPITokenService: null!);
+            userAPITokenService: null!,
+            forzaSheetImporter: null!);
 
     [Fact]
     public async Task HandleBettingInput_立即同步赛事_自动化维护中_拒绝且不触发同步()

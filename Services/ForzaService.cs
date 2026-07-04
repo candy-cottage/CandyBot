@@ -13,16 +13,24 @@ namespace CandyCottage.CandyBot.Services
             if (page < 1) page = 1;
             int offset = (page - 1) * pageSize;
 
+            // 每调校一卡：从 Vehicles v JOIN VehicleTunes t 读取，SELECT 用旧别名保持渲染器兼容性。
+            // whereClause 中的列引用须已由调用方 table-qualify（v.Manufacturer/v.Model、t.Class/t.MatchType 等）。
+            string fromJoin = "FROM Vehicles v JOIN VehicleTunes t ON t.VehicleId = v.Id";
             string query = $@"
-                SELECT 
-                    Id, Class, MatchType, Manufacturer, Model, Year, Drivetrain,
-                    Attribute, TireCompound, SurfaceCondition, Strength, Tune, Remarks, LapTime
-                FROM Vehicles
+                SELECT
+                    t.Id AS Id, t.Class, t.MatchType,
+                    v.Manufacturer, v.Model, v.Year,
+                    t.Drivetrain,
+                    t.PerformancePreference AS Attribute,
+                    t.TireCompound, t.SurfaceCondition, t.Strength,
+                    t.TuneRaw AS Tune,
+                    t.Remarks, t.LapTime
+                {fromJoin}
                 {whereClause}
-                ORDER BY Class, Manufacturer, Model
+                ORDER BY t.Class, v.Manufacturer, v.Model
                 LIMIT {offset}, {pageSize}";
 
-            // 参数传不过来，临时不清参数
+            // 参数需在 SELECT 和 COUNT 之间复用，临时不清参数
             sql.ClearParametersAfterExecute = false;
             sql.ExecuteDataSet(query);
             sql.ClearParametersAfterExecute = true;
@@ -32,8 +40,8 @@ namespace CandyCottage.CandyBot.Services
 
             DataTable dt = sql.DataSet.Tables[0];
 
-            // 计算总记录数
-            string countQuery = $"SELECT COUNT(*) FROM Vehicles {whereClause}";
+            // COUNT 与 SELECT 同 FROM/JOIN/WHERE，计数调校行（每调校一卡）
+            string countQuery = $"SELECT COUNT(*) {fromJoin} {whereClause}";
             DataRow? dr = sql.ExecuteDataRow(countQuery);
             int totalCount = 0;
             if (sql.Success && dr != null) _ = int.TryParse(dr[0].ToString(), out totalCount);
@@ -42,10 +50,181 @@ namespace CandyCottage.CandyBot.Services
             return (true, "success", dt, totalPages);
         }
 
-        public (bool success, string message, DataTable? data, int totalPages) GetVehicleById(int id)
+        // ==================== 车型 CRUD（Task 7：ModelKey 唯一，确定性返回 VehicleId） ====================
+
+        /// <summary>
+        /// 按 ModelKey upsert 车型，并通过回读确定性地返回 VehicleId（只增不删）。
+        ///
+        /// 不依赖 LastInsertId：INSERT...ON DUPLICATE KEY 在 MySQL 的实际 LAST_INSERT_ID 行为因
+        /// 版本和参数而异；回读 SELECT 总是正确。新行的 IsManual 由 actorUserId 决定：
+        /// actorUserId != 0 表示手动创建（IsManual=1），0 表示系统/自动同步（IsManual=0）。
+        /// 已存在的行不会被覆写 IsManual。
+        ///
+        /// 前置：Manufacturer/Model 不能为空；Year 为 null 或 "" 归一化后相同（不产生新行）。
+        /// </summary>
+        /// <param name="request">车型信息（Manufacturer、Model 必填，Year 可选）。</param>
+        /// <param name="actorUserId">操作人用户ID；0 表示系统/自动同步。</param>
+        /// <param name="error">出错时的描述；成功时为 ""。</param>
+        /// <returns>upsert 后 Vehicles.Id；出错时返回 0。</returns>
+        public int EnsureVehicleModel(VehicleModelRequest request, long actorUserId, out string error)
+        {
+            error = "";
+
+            // 校验必填字段
+            if (string.IsNullOrWhiteSpace(request.Manufacturer))
+            {
+                error = "制造商不能为空。";
+                return 0;
+            }
+            if (string.IsNullOrWhiteSpace(request.Model))
+            {
+                error = "型号不能为空。";
+                return 0;
+            }
+
+            string modelKey = ForzaTuneIdentity.BuildModelKey(request.Manufacturer, request.Model, request.Year);
+            int isManual = actorUserId != 0 ? 1 : 0;
+
+            try
+            {
+                sql.NewTransaction();
+
+                // ON DUPLICATE KEY 只更新 Id=LAST_INSERT_ID(Id) 使得行保持不变，并激活 LAST_INSERT_ID；
+                // 但回读 SELECT 更可靠，避免 MySQL 驱动/版本之间 LastInsertId 的歧义。
+                sql.Parameters["@manufacturer"] = request.Manufacturer;
+                sql.Parameters["@model"] = request.Model;
+                sql.Parameters["@year"] = request.Year ?? (object)DBNull.Value;
+                sql.Parameters["@modelKey"] = modelKey;
+                sql.Parameters["@isManual"] = isManual;
+                sql.Parameters["@userId"] = actorUserId;
+                sql.Execute(@"
+                    INSERT INTO Vehicles (Manufacturer, Model, Year, ModelKey, IsManual, LastUpdatedUserId)
+                    VALUES (@manufacturer, @model, @year, @modelKey, @isManual, @userId)
+                    ON DUPLICATE KEY UPDATE Id = LAST_INSERT_ID(Id)");
+
+                if (!sql.Success)
+                {
+                    error = "写入车型失败，请稍后重试。";
+                    return 0;
+                }
+
+                sql.Commit();
+
+                // 回读以确定性获取 VehicleId（不信任 LastInsertId）
+                sql.Parameters["@key"] = modelKey;
+                DataRow? row = sql.ExecuteDataRow("SELECT Id FROM Vehicles WHERE ModelKey = @key");
+                if (!sql.Success || row == null)
+                {
+                    error = "写入后回读车型失败。";
+                    return 0;
+                }
+
+                // 新制造商加入后使制造商缓存失效
+                forzaConfig.Invalidate();
+                return Convert.ToInt32(row["Id"]);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "EnsureVehicleModel error: {Message}", ex.Message);
+                error = $"车型 upsert 异常：{ex.Message}";
+                return 0;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
+        /// <summary>
+        /// 按主键查询单条车型记录，返回统一的 (success, message, DataTable?, totalPages) 形态。
+        /// totalPages 固定为 1（车型按主键精确匹配，不分页）。
+        /// </summary>
+        public (bool success, string message, DataTable? data, int totalPages) GetVehicleModelById(int id)
         {
             sql.Parameters["@id"] = id;
-            return GetVehicleDataTable("WHERE Id = @id", 1, 1);
+            sql.ExecuteDataSet("SELECT * FROM Vehicles WHERE Id = @id");
+            if (!sql.Success || sql.DataSet is null || sql.DataSet.Tables.Count == 0
+                || sql.DataSet.Tables[0].Rows.Count == 0)
+                return (false, "未找到对应的车型。", null, 0);
+            return (true, "success", sql.DataSet.Tables[0], 1);
+        }
+
+        /// <summary>
+        /// 更新车型的 Manufacturer/Model/Year 并重新计算 ModelKey。
+        /// request.Id 为必填；Manufacturer 和 Model 不能更新为空。
+        /// LastUpdatedUserId 更新为 actorUserId。
+        /// </summary>
+        public bool UpdateVehicleModel(VehicleModelRequest request, long actorUserId, out string error)
+        {
+            error = "";
+
+            if (!request.Id.HasValue || request.Id.Value <= 0)
+            {
+                error = "请提供车型ID。";
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(request.Manufacturer))
+            {
+                error = "制造商不能为空。";
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(request.Model))
+            {
+                error = "型号不能为空。";
+                return false;
+            }
+
+            string modelKey = ForzaTuneIdentity.BuildModelKey(request.Manufacturer, request.Model, request.Year);
+
+            try
+            {
+                sql.NewTransaction();
+
+                // 确认记录存在（加行锁）
+                sql.Parameters["@id"] = request.Id.Value;
+                sql.ExecuteDataSetForUpdate("SELECT Id FROM Vehicles WHERE Id = @id");
+                if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
+                {
+                    error = "未找到对应的车型。";
+                    return false;
+                }
+
+                sql.Parameters["@manufacturer"] = request.Manufacturer;
+                sql.Parameters["@model"] = request.Model;
+                sql.Parameters["@year"] = request.Year ?? (object)DBNull.Value;
+                sql.Parameters["@modelKey"] = modelKey;
+                sql.Parameters["@userId"] = actorUserId;
+                sql.Parameters["@id"] = request.Id.Value;
+                sql.Execute(@"
+                    UPDATE Vehicles
+                    SET Manufacturer = @manufacturer,
+                        Model = @model,
+                        Year = @year,
+                        ModelKey = @modelKey,
+                        LastUpdatedUserId = @userId
+                    WHERE Id = @id");
+
+                if (!sql.Success)
+                {
+                    error = "更新车型失败。";
+                    return false;
+                }
+
+                sql.Commit();
+                // 制造商可能被改名，失效缓存
+                forzaConfig.Invalidate();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "UpdateVehicleModel error: {Message}", ex.Message);
+                error = $"更新车型异常：{ex.Message}";
+                return false;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
         }
 
         public (bool success, string message, DataTable? data, int totalPages) GetVehicleInfoRaw(string vehicleName, int page)
@@ -77,18 +256,19 @@ namespace CandyCottage.CandyBot.Services
 
             sql.Parameters["@search"] = $"%{EscapeLikeWildcards(keyword)}%";
             sql.Parameters["@compactSearch"] = $"%{EscapeLikeWildcards(keyword.Replace(" ", ""))}%";
+            // JOIN 路径后必须 table-qualify 所有来自 Vehicles 的列
             List<string> conditions =
             [
-                "Manufacturer LIKE @search",
-                "Model LIKE @search",
-                "REPLACE(CONCAT(Manufacturer, Model), ' ', '') LIKE @compactSearch",
+                "v.Manufacturer LIKE @search",
+                "v.Model LIKE @search",
+                "REPLACE(CONCAT(v.Manufacturer, v.Model), ' ', '') LIKE @compactSearch",
             ];
 
             for (int i = 0; i < aliasSearches.Count; i++)
             {
                 sql.Parameters[$"@aliasManufacturer{i}"] = aliasSearches[i].Manufacturer;
                 sql.Parameters[$"@aliasModel{i}"] = $"%{EscapeLikeWildcards(aliasSearches[i].ModelKeyword)}%";
-                conditions.Add($"(Manufacturer = @aliasManufacturer{i} AND REPLACE(Model, ' ', '') LIKE @aliasModel{i})");
+                conditions.Add($"(v.Manufacturer = @aliasManufacturer{i} AND REPLACE(v.Model, ' ', '') LIKE @aliasModel{i})");
             }
 
             return "WHERE " + string.Join(" OR ", conditions);
@@ -166,12 +346,13 @@ namespace CandyCottage.CandyBot.Services
             if (!string.IsNullOrEmpty(classInput))
             {
                 sql.Parameters["@class"] = classInput;
-                conditions.Add("Class = @class");
+                // JOIN 路径用 t.Class（来自 VehicleTunes）
+                conditions.Add("t.Class = @class");
             }
             if (!string.IsNullOrEmpty(matchTypeInput))
             {
                 sql.Parameters["@matchType"] = matchTypeInput;
-                conditions.Add("MatchType = @matchType");
+                conditions.Add("t.MatchType = @matchType");
             }
 
             string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(" AND ", conditions);
@@ -192,12 +373,13 @@ namespace CandyCottage.CandyBot.Services
             if (!string.IsNullOrEmpty(manufacturer))
             {
                 sql.Parameters["@manufacturer"] = $"%{EscapeLikeWildcards(manufacturer)}%";
-                conditions.Add("Manufacturer LIKE @manufacturer");
+                // JOIN 路径用 v.Manufacturer（来自 Vehicles）
+                conditions.Add("v.Manufacturer LIKE @manufacturer");
             }
             if (!string.IsNullOrEmpty(model))
             {
                 sql.Parameters["@model"] = $"%{EscapeLikeWildcards(model)}%";
-                conditions.Add("Model LIKE @model");
+                conditions.Add("v.Model LIKE @model");
             }
 
             string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(" AND ", conditions);
@@ -210,12 +392,13 @@ namespace CandyCottage.CandyBot.Services
             if (classInput != null)
             {
                 sql.Parameters["@class"] = classInput;
-                conditions.Add("Class = @class");
+                // JOIN 路径用 t.Class（来自 VehicleTunes）
+                conditions.Add("t.Class = @class");
             }
             if (matchTypeInput != null)
             {
                 sql.Parameters["@matchType"] = matchTypeInput;
-                conditions.Add("MatchType = @matchType");
+                conditions.Add("t.MatchType = @matchType");
             }
 
             string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(" OR ", conditions);
@@ -228,198 +411,93 @@ namespace CandyCottage.CandyBot.Services
             if (classInput != null)
             {
                 sql.Parameters["@class"] = classInput;
-                conditions.Add("Class = @class");
+                // JOIN 路径用 t.Class（来自 VehicleTunes）
+                conditions.Add("t.Class = @class");
             }
             if (matchTypeInput != null)
             {
                 sql.Parameters["@matchType"] = matchTypeInput;
-                conditions.Add("MatchType = @matchType");
+                conditions.Add("t.MatchType = @matchType");
             }
 
             string whereClause = conditions.Count == 0 ? "" : "WHERE " + string.Join(" AND ", conditions);
             return ExecuteVehicleQuery(whereClause, page, out totalPages);
         }
 
-        public bool UpdateVehicle(VehicleRequest request, out string error)
-        {
-            error = "";
-            if (sql == null)
-            {
-                error = "数据库连接失败。";
-                return false;
-            }
-
-            try
-            {
-                sql.NewTransaction();
-
-                // ----- 定位车辆 -----
-                int vehicleId = 0;
-                if (request.Id.HasValue && request.Id.Value > 0)
-                {
-                    sql.Parameters["@id"] = request.Id.Value;
-                    sql.ExecuteDataSetForUpdate("SELECT Id FROM Vehicles WHERE Id = @id");
-                }
-                else
-                {
-                    error = "请提供车辆ID以定位车辆。";
-                    return false;
-                }
-
-                if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
-                {
-                    error = "未找到对应的车辆。请检查定位条件是否正确。";
-                    return false;
-                }
-
-                vehicleId = Convert.ToInt32(sql.DataSet.Tables[0].Rows[0]["Id"]);
-
-                // ----- 构建 UPDATE 语句 -----
-                List<string> setClauses = [];
-                AddSetClause(setClauses, "Manufacturer", request.Manufacturer);
-                AddSetClause(setClauses, "Model", request.Model);
-                AddSetClause(setClauses, "Year", request.Year);
-                AddSetClause(setClauses, "Class", request.Class);
-                AddSetClause(setClauses, "MatchType", request.MatchType);
-                AddSetClause(setClauses, "Drivetrain", request.Drivetrain);
-                AddSetClause(setClauses, "Attribute", request.Attribute);
-                AddSetClause(setClauses, "TireCompound", request.TireCompound);
-                AddSetClause(setClauses, "SurfaceCondition", request.SurfaceCondition);
-                AddSetClause(setClauses, "Strength", request.Strength);
-                AddSetClause(setClauses, "Tune", request.Tune);
-                AddSetClause(setClauses, "Remarks", request.Remarks);
-                AddSetClause(setClauses, "LapTime", request.LapTime);
-                AddSetClause(setClauses, "ExtData", request.ExtData);
-
-                if (setClauses.Count == 0)
-                {
-                    error = "没有提供任何修改参数。";
-                    return false;
-                }
-
-                string updateSql = $"UPDATE Vehicles SET {string.Join(", ", setClauses)} WHERE Id = @id";
-                sql.Parameters["@id"] = vehicleId;
-                sql.Execute(updateSql);
-                if (!sql.Success)
-                {
-                    error = "更新车辆信息失败。";
-                    return false;
-                }
-
-                sql.Commit();
-                // 制造商可能被改名，失效缓存
-                forzaConfig.Invalidate();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error: {Message}", ex.Message);
-                error = $"修改车辆异常：{ex.Message}";
-                return false;
-            }
-            finally
-            {
-                sql.Rollback();
-            }
-        }
-
-        public bool AddVehicle(VehicleRequest request, out string error)
+        /// <summary>
+        /// 手动新增一条调校（人手维护）。
+        /// req.VehicleId 必填且必须已存在；Class/MatchType/Drivetrain 必填。
+        /// 手动调校无来源：SourceFileId=""，SourceIdentity="" — InsertTune 按此处理；
+        /// 用全局 seq 在 ('','') 槽内消歧，避免 uq_source_identity 冲突。
+        /// </summary>
+        /// <returns>新行的 TuneId；失败返回 0 并通过 error 输出错误描述。</returns>
+        public int AddTune(VehicleTuneRequest request, long actorUserId, out string error)
         {
             error = "";
 
             // 校验必填字段
-            if (request.Manufacturer is null)
+            if (request.VehicleId == null || request.VehicleId == 0)
             {
-                error = "制造商不能为空。";
-                return false;
+                error = "车辆ID不能为空。";
+                return 0;
             }
-            if (request.Model is null)
-            {
-                error = "型号不能为空。";
-                return false;
-            }
-            if (request.Class is null)
+            if (string.IsNullOrWhiteSpace(request.Class))
             {
                 error = "等级不能为空。";
-                return false;
+                return 0;
             }
-            if (request.MatchType is null)
+            if (string.IsNullOrWhiteSpace(request.MatchType))
             {
                 error = "比赛类型不能为空。";
-                return false;
+                return 0;
             }
-            if (request.Drivetrain is null)
+            if (string.IsNullOrWhiteSpace(request.Drivetrain))
             {
                 error = "驱动类型不能为空。";
-                return false;
+                return 0;
             }
 
             try
             {
-                sql.NewTransaction();
-                if (!InsertVehicle(request, out error))
+                // 校验 VehicleId 存在
+                sql.Parameters["@vehicleIdCheck"] = request.VehicleId.Value;
+                DataRow? vehicleRow = sql.ExecuteDataRow("SELECT 1 FROM Vehicles WHERE Id = @vehicleIdCheck");
+                if (!sql.Success || vehicleRow == null)
                 {
-                    return false;
+                    error = $"车辆ID {request.VehicleId.Value} 不存在，请先使用\"新增车型\"创建车型。";
+                    return 0;
                 }
+
+                // 手动路径：SourceFileId=""，IsManual=true
+                request.SourceFileId = "";
+                request.IsManual = true;
+                request.LastUpdatedUserId = actorUserId;
+
+                // 计算手动调校的 seq（在 SourceFileId='', SourceIdentity='' 槽内全局递增）
+                DataRow? seqRow = sql.ExecuteDataRow(
+                    "SELECT COALESCE(MAX(SourceIdentitySeq), -1) FROM VehicleTunes WHERE SourceFileId = '' AND SourceIdentity = ''");
+                int seq = 0;
+                if (sql.Success && seqRow != null)
+                {
+                    seq = Convert.ToInt32(seqRow[0]) + 1;
+                }
+
+                sql.NewTransaction();
+                int tuneId = InsertTune(request, seq, out error);
+                if (tuneId == 0)
+                    return 0;
                 sql.Commit();
-                return true;
+                return tuneId;
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "AddVehicle error: {Message}", ex.Message);
-                error = $"新增车辆异常：{ex.Message}";
-                return false;
+                logger.LogError(ex, "AddTune error: {Message}", ex.Message);
+                error = $"新增调校异常：{ex.Message}";
+                return 0;
             }
             finally
             {
                 sql.Rollback();
-            }
-        }
-
-        /// <summary>
-        /// 构建并执行单条车辆 INSERT，<b>不开启自身事务</b>——由调用方负责事务边界
-        /// （commit / rollback）。这使得导入器可以在一个外层事务内 DELETE + 循环插入 N 辆车，
-        /// 任一失败即整体回滚。<c>AddVehicle</c> 在校验必填字段后包一层事务委托至此。
-        /// </summary>
-        /// <remarks>internal 仅为便于集成测试直接验证「外层事务可回滚本插入」（见 InternalsVisibleTo）。</remarks>
-        internal bool InsertVehicle(VehicleRequest request, out string error)
-        {
-            error = "";
-            try
-            {
-                List<string> columns = [];
-                List<string> values = [];
-                AddField(columns, values, "Manufacturer", request.Manufacturer);
-                AddField(columns, values, "Model", request.Model);
-                AddField(columns, values, "Year", request.Year);
-                AddField(columns, values, "Class", request.Class);
-                AddField(columns, values, "MatchType", request.MatchType);
-                AddField(columns, values, "Drivetrain", request.Drivetrain);
-                AddField(columns, values, "Attribute", request.Attribute);
-                AddField(columns, values, "TireCompound", request.TireCompound);
-                AddField(columns, values, "SurfaceCondition", request.SurfaceCondition);
-                AddField(columns, values, "Strength", request.Strength);
-                AddField(columns, values, "Tune", request.Tune);
-                AddField(columns, values, "Remarks", request.Remarks);
-                AddField(columns, values, "LapTime", request.LapTime);
-                AddField(columns, values, "ExtData", request.ExtData);
-
-                string insertSql = $"INSERT INTO Vehicles ({string.Join(", ", columns)}) VALUES ({string.Join(", ", values)})";
-                sql.Execute(insertSql);
-                if (!sql.Success)
-                {
-                    error = "新增车辆失败，请稍后重试。";
-                    return false;
-                }
-                // 可能引入新制造商，失效缓存（清空总是安全的，最坏只是下次搜索多一次 DISTINCT 查询）
-                forzaConfig.Invalidate();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "InsertVehicle error: {Message}", ex.Message);
-                error = $"新增车辆异常：{ex.Message}";
-                return false;
             }
         }
 
@@ -458,6 +536,46 @@ namespace CandyCottage.CandyBot.Services
             }
         }
 
+        /// <summary>
+        /// 按车型主键批量删除 Vehicles 行。FK（fk_tune_vehicle ON DELETE CASCADE）负责级联删除对应
+        /// 的 VehicleTunes 和 VehicleTuneCache 行，无需在应用层手工删除。
+        /// 返回 (success, message, deletedCount)；deletedCount 为 Vehicles 的实际影响行数。
+        /// </summary>
+        public (bool success, string message, int deletedCount) DeleteVehicleModelsByIds(List<int> ids)
+        {
+            if (ids == null || ids.Count == 0)
+                return (false, "未提供有效的车型ID", 0);
+
+            try
+            {
+                sql.NewTransaction();
+                string inClause = string.Join(",", ids.Select((_, i) => $"@id{i}"));
+                for (int i = 0; i < ids.Count; i++)
+                    sql.Parameters[$"@id{i}"] = ids[i];
+
+                // FK ON DELETE CASCADE 自动级联删除 VehicleTunes / VehicleTuneCache
+                string query = $"DELETE FROM Vehicles WHERE Id IN ({inClause})";
+                sql.Execute(query);
+                if (!sql.Success)
+                    return (false, "删除车型失败，请稍后重试", 0);
+
+                int deleted = sql.AffectedRows;
+                sql.Commit();
+                // 制造商可能因此完全消失，失效缓存
+                forzaConfig.Invalidate();
+                return (true, $"成功删除 {deleted} 个车型（含全部关联调校）", deleted);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "DeleteVehicleModelsByIds error");
+                return (false, $"删除车型异常：{ex.Message}", 0);
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
         public (bool success, string message, List<VehicleMatch>? matches) FindVehiclesByCriteria(VehicleRequest request)
         {
             List<VehicleMatch> matches = [];
@@ -466,24 +584,32 @@ namespace CandyCottage.CandyBot.Services
             {
                 sql.Parameters.Clear();
                 List<string> whereClauses = [];
-                AddWhereClause(whereClauses, "Manufacturer", request.Manufacturer);
-                AddWhereClause(whereClauses, "Model", request.Model);
-                AddWhereClause(whereClauses, "Year", request.Year);
-                AddWhereClause(whereClauses, "Class", request.Class);
-                AddWhereClause(whereClauses, "MatchType", request.MatchType);
-                AddWhereClause(whereClauses, "Drivetrain", request.Drivetrain);
-                AddWhereClause(whereClauses, "Attribute", request.Attribute);
-                AddWhereClause(whereClauses, "TireCompound", request.TireCompound);
-                AddWhereClause(whereClauses, "SurfaceCondition", request.SurfaceCondition);
-                AddWhereClause(whereClauses, "Strength", request.Strength);
-                AddWhereClause(whereClauses, "Tune", request.Tune);
-                AddWhereClause(whereClauses, "Remarks", request.Remarks);
-                AddWhereClause(whereClauses, "LapTime", request.LapTime);
+
+                // 车型字段 → v 表
+                AddWhereClause(whereClauses, "v.Manufacturer", "Manufacturer", request.Manufacturer);
+                AddWhereClause(whereClauses, "v.Model", "Model", request.Model);
+                AddWhereClause(whereClauses, "v.Year", "Year", request.Year);
+
+                // 调校字段 → t 表；Attribute → t.PerformancePreference；Tune → t.TuneRaw
+                AddWhereClause(whereClauses, "t.Class", "Class", request.Class);
+                AddWhereClause(whereClauses, "t.MatchType", "MatchType", request.MatchType);
+                AddWhereClause(whereClauses, "t.Drivetrain", "Drivetrain", request.Drivetrain);
+                AddWhereClause(whereClauses, "t.PerformancePreference", "Attribute", request.Attribute);
+                AddWhereClause(whereClauses, "t.TireCompound", "TireCompound", request.TireCompound);
+                AddWhereClause(whereClauses, "t.SurfaceCondition", "SurfaceCondition", request.SurfaceCondition);
+                AddWhereClause(whereClauses, "t.Strength", "Strength", request.Strength);
+                AddWhereClause(whereClauses, "t.TuneRaw", "Tune", request.Tune);
+                AddWhereClause(whereClauses, "t.Remarks", "Remarks", request.Remarks);
+                AddWhereClause(whereClauses, "t.LapTime", "LapTime", request.LapTime);
 
                 string query = @$"
-                    SELECT Id, Manufacturer, Model, Year, Class, MatchType, Drivetrain, Strength
-                    FROM Vehicles
-                    {string.Join(" ", whereClauses)}";
+                    SELECT t.Id AS TuneId, v.Id AS VehicleId,
+                           v.Manufacturer, v.Model, v.Year,
+                           t.Class, t.MatchType, t.Drivetrain, t.Strength
+                    FROM Vehicles v
+                    JOIN VehicleTunes t ON t.VehicleId = v.Id
+                    {string.Join(" ", whereClauses)}
+                    ORDER BY t.Class, v.Manufacturer, v.Model";
 
                 sql.ExecuteDataSet(query);
                 if (!sql.Success || sql.DataSet.Tables[0].Rows.Count == 0)
@@ -492,15 +618,17 @@ namespace CandyCottage.CandyBot.Services
                 DataTable dt = sql.DataSet.Tables[0];
                 foreach (DataRow row in dt.Rows)
                 {
-                    string display = $"{row["Manufacturer"]} {row["Model"]} ({row["Year"]}) [{row["Class"]}/{row["MatchType"]}]";
+                    string year = row["Year"]?.ToString() ?? "";
+                    string yearPart = string.IsNullOrEmpty(year) ? "" : $" ({year})";
+                    string display = $"{row["Manufacturer"]} {row["Model"]}{yearPart} [{row["Class"]}/{row["MatchType"]}]";
                     matches.Add(new VehicleMatch
                     {
-                        Id = Convert.ToInt32(row["Id"]),
+                        Id = Convert.ToInt32(row["TuneId"]),
                         DisplayName = display
                     });
                 }
 
-                return (true, $"找到 {matches.Count} 辆匹配的车辆", matches);
+                return (true, $"找到 {matches.Count} 条匹配调校", matches);
             }
             catch (Exception ex)
             {
@@ -571,6 +699,20 @@ namespace CandyCottage.CandyBot.Services
         }
 
         /// <summary>
+        /// JOIN 查询专用重载：<paramref name="qualifiedColumn"/> 是带表前缀的列引用（如 <c>t.Class</c>），
+        /// <paramref name="paramName"/> 是无歧义的参数名（如 <c>Class</c>，对应绑定变量 <c>@Class</c>）。
+        /// null 或空串均视为"不过滤"。
+        /// </summary>
+        private void AddWhereClause(List<string> clauses, string qualifiedColumn, string paramName, string? value)
+        {
+            if (!string.IsNullOrEmpty(value))
+            {
+                sql.Parameters[$"@{paramName}"] = value;
+                clauses.Add(($"{(clauses.Count == 0 ? "WHERE " : "AND ")}{qualifiedColumn} = @{paramName}"));
+            }
+        }
+
+        /// <summary>
         /// 将车辆查询结果渲染为「卡片/分行」式 Markdown 文本，每辆车一张卡片，卡片间用分隔线隔开。
         /// 只输出非空字段，避免空列占据移动端消息卡片的宽度。这是纯呈现逻辑，不触碰数据库——
         /// 调用方负责传入已查好的 DataTable（列须包含 Id 及各车辆字段）。
@@ -632,6 +774,486 @@ namespace CandyCottage.CandyBot.Services
                 sql.Parameters[$"@{column}"] = value;
                 values.Add($"@{column}");
             }
+        }
+
+
+        // ==================== 调校 CRUD（Task 8：冻结 identity + 指纹 + 清缓存） ====================
+
+        /// <summary>
+        /// 插入一条调校记录，<b>不开启自身事务</b>——由调用方负责事务边界。
+        /// seq 为该来源同 identity 的 SourceIdentitySeq（调用方按需传入）。
+        ///
+        /// 同步路径（SourceFileId 非空）：写入 SourceIdentity / SourceFingerprint。
+        /// 手动路径（SourceFileId 为空）：SourceIdentity = ""，SourceFingerprint = NULL。
+        ///
+        /// 前置：request.VehicleId 必须由调用方先确定；Class/MatchType 为 NOT NULL，缺失即报错。
+        /// </summary>
+        /// <returns>新行的 TuneId；失败返回 0 并通过 error 输出错误描述。</returns>
+        internal int InsertTune(VehicleTuneRequest request, int seq, out string error)
+        {
+            error = "";
+
+            if (string.IsNullOrWhiteSpace(request.Class))
+            {
+                error = "等级（Class）不能为空。";
+                return 0;
+            }
+            if (string.IsNullOrWhiteSpace(request.MatchType))
+            {
+                error = "比赛类型（MatchType）不能为空。";
+                return 0;
+            }
+
+            try
+            {
+                string modelKey = ForzaTuneIdentity.BuildModelKey(request.Manufacturer, request.Model, request.Year);
+                string tuner = ForzaTuneIdentity.TunerKey(ForzaTuneIdentity.ParseTuners(request.TuneRaw));
+                string sourceIdentity;
+                string? sourceFingerprint;
+
+                bool hasSrc = !string.IsNullOrEmpty(request.SourceFileId);
+                if (hasSrc)
+                {
+                    sourceIdentity = ForzaTuneIdentity.BuildSourceIdentity(request, modelKey, request.SourceFileId!);
+                    sourceFingerprint = ForzaTuneIdentity.BuildFingerprint(request, modelKey);
+                }
+                else
+                {
+                    sourceIdentity = "";
+                    sourceFingerprint = null;
+                }
+
+                string tuneStatus = request.TuneStatus ?? "正常";
+                int isManual = request.IsManual ? 1 : 0;
+
+                sql.Parameters["@vehicleId"] = request.VehicleId ?? 0;
+                sql.Parameters["@class"] = request.Class;
+                sql.Parameters["@matchType"] = request.MatchType;
+                sql.Parameters["@drivetrain"] = request.Drivetrain ?? (object)DBNull.Value;
+                sql.Parameters["@perfPref"] = request.PerformancePreference ?? (object)DBNull.Value;
+                sql.Parameters["@tireCompound"] = request.TireCompound ?? (object)DBNull.Value;
+                sql.Parameters["@surfCond"] = request.SurfaceCondition ?? (object)DBNull.Value;
+                sql.Parameters["@strength"] = request.Strength ?? (object)DBNull.Value;
+                sql.Parameters["@tuner"] = string.IsNullOrEmpty(tuner) ? (object)DBNull.Value : tuner;
+                sql.Parameters["@tuneRaw"] = request.TuneRaw ?? (object)DBNull.Value;
+                sql.Parameters["@remarks"] = request.Remarks ?? (object)DBNull.Value;
+                sql.Parameters["@lapTime"] = request.LapTime ?? (object)DBNull.Value;
+                sql.Parameters["@extData"] = request.ExtData ?? (object)DBNull.Value;
+                sql.Parameters["@sourceFileId"] = request.SourceFileId ?? "";
+                sql.Parameters["@sourceSheet"] = request.SourceSheet ?? (object)DBNull.Value;
+                sql.Parameters["@sourceRow"] = request.SourceRow.HasValue ? request.SourceRow.Value : (object)DBNull.Value;
+                sql.Parameters["@sourceDisplayName"] = request.SourceDisplayName ?? (object)DBNull.Value;
+                sql.Parameters["@sourceIdentity"] = sourceIdentity;
+                sql.Parameters["@sourceIdentitySeq"] = seq;
+                sql.Parameters["@sourceFingerprint"] = sourceFingerprint ?? (object)DBNull.Value;
+                sql.Parameters["@isManual"] = isManual;
+                sql.Parameters["@tuneStatus"] = tuneStatus;
+                sql.Parameters["@userId"] = request.LastUpdatedUserId;
+
+                sql.Execute(@"
+                    INSERT INTO VehicleTunes
+                        (VehicleId, Class, MatchType, Drivetrain, PerformancePreference,
+                         TireCompound, SurfaceCondition, Strength, Tuner, TuneRaw,
+                         Remarks, LapTime, ExtData,
+                         SourceFileId, SourceSheet, SourceRow, SourceDisplayName,
+                         SourceIdentity, SourceIdentitySeq, SourceFingerprint,
+                         IsManual, TuneStatus, LastUpdatedUserId)
+                    VALUES
+                        (@vehicleId, @class, @matchType, @drivetrain, @perfPref,
+                         @tireCompound, @surfCond, @strength, @tuner, @tuneRaw,
+                         @remarks, @lapTime, @extData,
+                         @sourceFileId, @sourceSheet, @sourceRow, @sourceDisplayName,
+                         @sourceIdentity, @sourceIdentitySeq, @sourceFingerprint,
+                         @isManual, @tuneStatus, @userId)");
+
+                if (!sql.Success)
+                {
+                    error = "插入调校失败，请稍后重试。";
+                    return 0;
+                }
+
+                return (int)sql.LastInsertId;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "InsertTune error: {Message}", ex.Message);
+                error = $"插入调校异常：{ex.Message}";
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 管理员编辑调校显示值：更新可编辑列（Class、MatchType、Drivetrain、PerformancePreference、
+        /// TireCompound、SurfaceCondition、Strength、TuneRaw、Remarks、LapTime、ExtData），
+        /// <b>冻结</b> SourceIdentity 与 SourceFingerprint（不出现在 SET 列表中）。
+        /// 未显式给 TuneStatus 时，回写为"正常"。
+        /// 更新后清除该调校的 VehicleTuneCache 行。
+        /// </summary>
+        public bool UpdateTune(VehicleTuneRequest request, long actorUserId, out string error)
+        {
+            error = "";
+
+            if (!request.Id.HasValue || request.Id.Value <= 0)
+            {
+                error = "请提供调校ID。";
+                return false;
+            }
+
+            try
+            {
+                sql.NewTransaction();
+
+                // 确认记录存在（加行锁）
+                sql.Parameters["@id"] = request.Id.Value;
+                sql.ExecuteDataSetForUpdate("SELECT Id FROM VehicleTunes WHERE Id = @id");
+                if (!sql.Success || sql.DataSet is null || sql.DataSet.Tables.Count == 0
+                    || sql.DataSet.Tables[0].Rows.Count == 0)
+                {
+                    error = "未找到对应的调校记录。";
+                    return false;
+                }
+
+                // 重新计算 Tuner
+                string tuner = ForzaTuneIdentity.TunerKey(ForzaTuneIdentity.ParseTuners(request.TuneRaw));
+                string tuneStatus = string.IsNullOrEmpty(request.TuneStatus) ? "正常" : request.TuneStatus;
+
+                // 决策15：编辑显示字段时置位 IsManual=1（让后续同步走缓存路径）；
+                // 仅改调校状态（TuneStatus）不置位——避免状态调整误标记来源调校为人手维护。
+                bool changesDisplayField =
+                    request.Class != null ||
+                    request.MatchType != null ||
+                    request.Drivetrain != null ||
+                    request.PerformancePreference != null ||
+                    request.TireCompound != null ||
+                    request.SurfaceCondition != null ||
+                    request.Strength != null ||
+                    request.TuneRaw != null ||
+                    request.Remarks != null ||
+                    request.LapTime != null ||
+                    request.ExtData != null;
+
+                List<string> setClauses = [];
+                // 可编辑列（不含 SourceIdentity / SourceFingerprint）
+                AddSetClause(setClauses, "Class", request.Class);
+                AddSetClause(setClauses, "MatchType", request.MatchType);
+                AddSetClause(setClauses, "Drivetrain", request.Drivetrain);
+                AddSetClause(setClauses, "PerformancePreference", request.PerformancePreference);
+                AddSetClause(setClauses, "TireCompound", request.TireCompound);
+                AddSetClause(setClauses, "SurfaceCondition", request.SurfaceCondition);
+                AddSetClause(setClauses, "Strength", request.Strength);
+                AddSetClause(setClauses, "LapTime", request.LapTime);
+                AddSetClause(setClauses, "Remarks", request.Remarks);
+                AddSetClause(setClauses, "ExtData", request.ExtData);
+                // TuneRaw + 派生的 Tuner 同步更新；TuneRaw 未提供时两列均不写入，避免置空已有值
+                if (request.TuneRaw != null)
+                {
+                    sql.Parameters["@TuneRaw"] = request.TuneRaw;
+                    setClauses.Add("TuneRaw = @TuneRaw");
+                    sql.Parameters["@Tuner"] = string.IsNullOrEmpty(tuner) ? (object)DBNull.Value : tuner;
+                    setClauses.Add("Tuner = @Tuner");
+                }
+
+                // 固定更新的列
+                sql.Parameters["@TuneStatus"] = tuneStatus;
+                sql.Parameters["@LastUpdatedUserId"] = actorUserId;
+                sql.Parameters["@LastUpdatedAt"] = DateTime.UtcNow;
+                setClauses.Add("TuneStatus = @TuneStatus");
+                setClauses.Add("LastUpdatedUserId = @LastUpdatedUserId");
+                setClauses.Add("LastUpdatedAt = @LastUpdatedAt");
+
+                // 决策15：只改显示字段时才置位 IsManual
+                if (changesDisplayField)
+                {
+                    sql.Parameters["@IsManual"] = 1;
+                    setClauses.Add("IsManual = @IsManual");
+                }
+
+                sql.Parameters["@id"] = request.Id.Value;
+                sql.Execute($"UPDATE VehicleTunes SET {string.Join(", ", setClauses)} WHERE Id = @id");
+                if (!sql.Success)
+                {
+                    error = "更新调校失败。";
+                    return false;
+                }
+
+                // 清除该调校的缓存行
+                sql.Parameters["@cacheId"] = request.Id.Value;
+                sql.Execute("DELETE FROM VehicleTuneCache WHERE TuneId = @cacheId");
+                // 缓存删除失败不影响主更新成功状态，仅记录日志
+                if (!sql.Success)
+                    logger.LogWarning("UpdateTune: 清除 VehicleTuneCache 行失败，TuneId={Id}", request.Id.Value);
+
+                sql.Commit();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "UpdateTune error: {Message}", ex.Message);
+                error = $"更新调校异常：{ex.Message}";
+                return false;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
+        /// <summary>
+        /// 按主键列表批量删除调校记录，同时清除对应的 VehicleTuneCache 行。
+        /// 返回 (success, message, deletedCount)；deletedCount 为 VehicleTunes 的实际影响行数。
+        /// </summary>
+        public (bool success, string message, int deletedCount) DeleteTunesByIds(List<int> ids)
+        {
+            if (ids == null || ids.Count == 0)
+                return (false, "未提供有效的调校ID", 0);
+
+            try
+            {
+                sql.NewTransaction();
+
+                string inClause = string.Join(",", ids.Select((_, i) => $"@id{i}"));
+                for (int i = 0; i < ids.Count; i++)
+                    sql.Parameters[$"@id{i}"] = ids[i];
+
+                // 先删缓存（参数复用，ClearParametersAfterExecute 默认 true，所以缓存删除用独立参数）
+                string cacheInClause = string.Join(",", ids.Select((_, i) => $"@cid{i}"));
+                for (int i = 0; i < ids.Count; i++)
+                    sql.Parameters[$"@cid{i}"] = ids[i];
+
+                sql.ClearParametersAfterExecute = false;
+                sql.Execute($"DELETE FROM VehicleTuneCache WHERE TuneId IN ({cacheInClause})");
+                sql.ClearParametersAfterExecute = true;
+
+                // 再删主表
+                sql.Execute($"DELETE FROM VehicleTunes WHERE Id IN ({inClause})");
+                if (!sql.Success)
+                    return (false, "删除调校失败，请稍后重试", 0);
+
+                int deleted = sql.AffectedRows;
+                sql.Commit();
+                return (true, $"成功删除 {deleted} 条调校", deleted);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "DeleteTunesByIds error");
+                return (false, $"删除异常：{ex.Message}", 0);
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
+        /// <summary>
+        /// 按车型 ID 查询该车型下的所有调校记录，按 Id 升序返回，不分页。
+        /// 返回形态与 GetVehicleModelById 一致：(success, message, DataTable?, totalPages)；
+        /// totalPages 固定为 1（车型精确匹配，无需分页）。
+        /// </summary>
+        public (bool success, string message, DataTable? data, int totalPages) GetTunesByVehicleId(int vehicleId)
+        {
+            sql.Parameters["@vid"] = vehicleId;
+            sql.ExecuteDataSet("SELECT * FROM VehicleTunes WHERE VehicleId = @vid ORDER BY Id");
+            if (!sql.Success || sql.DataSet is null || sql.DataSet.Tables.Count == 0
+                || sql.DataSet.Tables[0].Rows.Count == 0)
+                return (false, "未找到该车型的调校记录。", null, 0);
+            return (true, "success", sql.DataSet.Tables[0], 1);
+        }
+
+        /// <summary>
+        /// 按 TuneId 查询单条调校记录（VehicleTunes 主键精确匹配）。
+        /// totalPages 固定为 1（单行精确匹配，无分页需求）。
+        /// </summary>
+        public (bool success, string message, DataRow? row) GetTuneById(int tuneId)
+        {
+            sql.Parameters["@tid"] = tuneId;
+            DataRow? row = sql.ExecuteDataRow("SELECT * FROM VehicleTunes WHERE Id = @tid");
+            if (!sql.Success || row == null)
+                return (false, "未找到对应的调校记录。", null);
+            return (true, "success", row);
+        }
+
+        /// <summary>
+        /// 按状态分页查询调校记录（镜像 GetVehicleDataTable 的分页风格）。
+        /// status 对应 TuneStatus 列（如"正常"/"存疑"/"弃用"）。
+        /// </summary>
+        public (bool success, string message, DataTable? data, int totalPages) ListTunesByStatus(string status, int page, int pageSize = 12)
+        {
+            if (page < 1) page = 1;
+            int offset = (page - 1) * pageSize;
+
+            sql.Parameters["@status"] = status;
+
+            // 参数传不过去 COUNT 查询（ClearParametersAfterExecute 默认 true），临时关闭
+            sql.ClearParametersAfterExecute = false;
+            sql.ExecuteDataSet($@"
+                SELECT * FROM VehicleTunes
+                WHERE TuneStatus = @status
+                ORDER BY Id
+                LIMIT {offset}, {pageSize}");
+            sql.ClearParametersAfterExecute = true;
+
+            if (sql.DataSet is null || sql.DataSet.Tables.Count == 0 || sql.DataSet.Tables[0].Rows.Count == 0)
+                return (false, "未找到符合条件的调校记录。", null, 0);
+
+            DataTable dt = sql.DataSet.Tables[0];
+
+            DataRow? countRow = sql.ExecuteDataRow("SELECT COUNT(*) FROM VehicleTunes WHERE TuneStatus = @status");
+            int totalCount = 0;
+            if (sql.Success && countRow != null)
+                _ = int.TryParse(countRow[0].ToString(), out totalCount);
+
+            int totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+            return (true, "success", dt, totalPages);
+        }
+
+        /// <summary>
+        /// 按 TuneId 查询单条缓存行（VehicleTuneCache），用于差异展示与更新前核查。
+        /// </summary>
+        public (bool success, DataRow? row) GetCacheTuneByTuneId(int tuneId)
+        {
+            sql.Parameters["@tid"] = tuneId;
+            DataRow? row = sql.ExecuteDataRow("SELECT * FROM VehicleTuneCache WHERE TuneId = @tid");
+            return (sql.Success && row != null, sql.Success ? row : null);
+        }
+
+        /// <summary>
+        /// 将缓存快照（VehicleTuneCache）应用到对应的 VehicleTunes 行，一次 MySQL 事务完成：
+        /// 1. FOR UPDATE 锁定缓存行；2. 覆写 live 行的源衍生展示字段；
+        /// 3. 清除 IsManual=0，TuneStatus='正常'，记录操作人；4. 删除缓存行；5. 提交。
+        ///
+        /// 前置：tuneId 在 VehicleTuneCache 中必须存在（且在 VehicleTunes 中有对应行）。
+        /// </summary>
+        /// <param name="tuneId">要应用缓存的调校 ID。</param>
+        /// <param name="actorUserId">操作人用户 ID，写入 LastUpdatedUserId。</param>
+        /// <param name="error">出错时的描述；成功时为 ""。</param>
+        /// <returns>成功时 true；缓存行不存在或 SQL 失败时 false。</returns>
+        public bool ApplyCachedTune(int tuneId, long actorUserId, out string error)
+        {
+            error = "";
+            try
+            {
+                sql.NewTransaction();
+
+                // 加行锁：缓存行不存在则失败
+                sql.Parameters["@tuneId"] = tuneId;
+                sql.ExecuteDataSetForUpdate("SELECT * FROM VehicleTuneCache WHERE TuneId = @tuneId");
+                if (!sql.Success || sql.DataSet is null || sql.DataSet.Tables.Count == 0
+                    || sql.DataSet.Tables[0].Rows.Count == 0)
+                {
+                    error = "未找到对应的缓存行，可能已被清除。";
+                    return false;
+                }
+
+                DataRow cache = sql.DataSet.Tables[0].Rows[0];
+
+                // 重新计算 Tuner（TuneRaw 可能已更新）
+                string tuneRaw = cache["TuneRaw"]?.ToString() ?? "";
+                string tuner = ForzaTuneIdentity.TunerKey(ForzaTuneIdentity.ParseTuners(tuneRaw));
+
+                // 应用缓存快照到 live 行：覆写源衍生展示字段，清除人手维护标记，重置状态
+                sql.Parameters["@class"] = cache["Class"] ?? (object)DBNull.Value;
+                sql.Parameters["@matchType"] = cache["MatchType"] ?? (object)DBNull.Value;
+                sql.Parameters["@drivetrain"] = cache["Drivetrain"] ?? (object)DBNull.Value;
+                sql.Parameters["@perfPref"] = cache["PerformancePreference"] ?? (object)DBNull.Value;
+                sql.Parameters["@tireCompound"] = cache["TireCompound"] ?? (object)DBNull.Value;
+                sql.Parameters["@surfCond"] = cache["SurfaceCondition"] ?? (object)DBNull.Value;
+                sql.Parameters["@strength"] = cache["Strength"] ?? (object)DBNull.Value;
+                sql.Parameters["@tuner"] = string.IsNullOrEmpty(tuner) ? (object)DBNull.Value : tuner;
+                sql.Parameters["@tuneRaw"] = cache["TuneRaw"] ?? (object)DBNull.Value;
+                sql.Parameters["@remarks"] = cache["Remarks"] ?? (object)DBNull.Value;
+                sql.Parameters["@lapTime"] = cache["LapTime"] ?? (object)DBNull.Value;
+                sql.Parameters["@extData"] = cache["ExtData"] ?? (object)DBNull.Value;
+                sql.Parameters["@sourceFingerprint"] = cache["SourceFingerprint"] ?? (object)DBNull.Value;
+                sql.Parameters["@actorUserId"] = actorUserId;
+                sql.Parameters["@id"] = tuneId;
+
+                sql.Execute(@"
+                    UPDATE VehicleTunes SET
+                        Class = @class,
+                        MatchType = @matchType,
+                        Drivetrain = @drivetrain,
+                        PerformancePreference = @perfPref,
+                        TireCompound = @tireCompound,
+                        SurfaceCondition = @surfCond,
+                        Strength = @strength,
+                        Tuner = @tuner,
+                        TuneRaw = @tuneRaw,
+                        Remarks = @remarks,
+                        LapTime = @lapTime,
+                        ExtData = @extData,
+                        SourceFingerprint = @sourceFingerprint,
+                        IsManual = 0,
+                        TuneStatus = '正常',
+                        LastUpdatedUserId = @actorUserId,
+                        LastUpdatedAt = NOW()
+                    WHERE Id = @id");
+
+                if (!sql.Success)
+                {
+                    error = "更新调校失败，请稍后重试。";
+                    return false;
+                }
+
+                // 删除缓存行
+                sql.Parameters["@delId"] = tuneId;
+                sql.Execute("DELETE FROM VehicleTuneCache WHERE TuneId = @delId");
+                if (!sql.Success)
+                {
+                    error = "清除缓存行失败，请稍后重试。";
+                    return false;
+                }
+
+                sql.Commit();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "ApplyCachedTune error: {Message}", ex.Message);
+                error = $"应用缓存异常：{ex.Message}";
+                return false;
+            }
+            finally
+            {
+                sql.Rollback();
+            }
+        }
+
+        /// <summary>
+        /// 对比 live 调校行与缓存行的源衍生展示字段，逐字段输出变化行（字段：旧值 -&gt; 新值）。
+        /// 字段来自两张表同名列：Class、MatchType、Drivetrain、PerformancePreference、TireCompound、
+        /// SurfaceCondition、Strength、TuneRaw、Remarks、LapTime。
+        /// 若无任何变化则返回空串。
+        /// </summary>
+        /// <param name="liveRow">VehicleTunes 当前行（旧值来源）。</param>
+        /// <param name="cacheRow">VehicleTuneCache 缓存行（新值来源）。</param>
+        /// <returns>差异描述；无变化时为 ""。</returns>
+        internal static string RenderTuneDiff(DataRow liveRow, DataRow cacheRow)
+        {
+            // 中文标签 → 列名（同时存在于 VehicleTunes 与 VehicleTuneCache）
+            (string 标签, string 列名)[] fields =
+            [
+                ("等级", "Class"),
+                ("比赛类型", "MatchType"),
+                ("驱动", "Drivetrain"),
+                ("属性", "PerformancePreference"),
+                ("胎面", "TireCompound"),
+                ("干湿地", "SurfaceCondition"),
+                ("强度", "Strength"),
+                ("调校", "TuneRaw"),
+                ("备注", "Remarks"),
+                ("圈速", "LapTime"),
+                ("扩展数据", "ExtData"),
+            ];
+
+            StringBuilder sb = new();
+            foreach ((string 标签, string 列名) in fields)
+            {
+                string oldVal = liveRow[列名]?.ToString() ?? "";
+                string newVal = cacheRow[列名]?.ToString() ?? "";
+                if (oldVal != newVal)
+                    sb.AppendLine($"{标签}：{oldVal} -> {newVal}");
+            }
+            return sb.ToString();
         }
 
         public class VehicleMatch

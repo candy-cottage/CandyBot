@@ -1,28 +1,92 @@
 -- ----------------------------
--- 1. 车辆表
+-- 1. 车辆表（车型主表）
 -- ----------------------------
-CREATE TABLE `Vehicles` (
-    `Id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
-    `Class` VARCHAR(20) NOT NULL COMMENT '等级',
-    `MatchType` VARCHAR(20) NOT NULL COMMENT '比赛类型',
-    `Manufacturer` VARCHAR(100) NOT NULL COMMENT '制造商',
-    `Model` VARCHAR(100) NOT NULL COMMENT '型号',
-    `Year` VARCHAR(20) NULL COMMENT '年份',
-    `Drivetrain` VARCHAR(20) NULL COMMENT '传动方式: 四驱, 后驱, 前驱',
-    `Attribute` VARCHAR(20) NULL COMMENT '属性: 均衡, 操控, 动力, 高速, 加速等',
-    `TireCompound` VARCHAR(50) NULL COMMENT '胎面: 半热熔, 全热熔, 拉力胎, 直线胎, 越野胎, 漂移胎等',
-    `SurfaceCondition` VARCHAR(20) NULL COMMENT '适用干/湿地: 干, 湿地, 通用',
-    `Strength` VARCHAR(20) NULL COMMENT '强度评级',
-    `Tune` VARCHAR(255) NULL COMMENT '调校信息 (调校师XboxID + 关键词)，可存储多个，用逗号分隔',
-    `Remarks` VARCHAR(255) NULL COMMENT '备注：手感、特殊开法等',
-    `LapTime` VARCHAR(255) NULL COMMENT '圈速测试结果，如“白川54.5”',
-    `ExtData` TEXT NULL COMMENT '扩展字段，存储额外属性，如侧向G值、极速等',
-    `CreatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `UpdatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`Id`),
-    INDEX `idx_class_match` (`Class`, `MatchType`),
-    INDEX `idx_manufacturer_model` (`Manufacturer`, `Model`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='车辆调校表';
+CREATE TABLE IF NOT EXISTS `Vehicles` (
+  `Id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `Manufacturer` VARCHAR(100) NOT NULL COMMENT '制造商',
+  `Model` VARCHAR(100) NOT NULL COMMENT '型号',
+  `Year` VARCHAR(20) NULL COMMENT '年份',
+  `ModelKey` VARCHAR(255) NOT NULL COLLATE utf8mb4_bin COMMENT '匹配键（制造商+型号规范化，区分大小写）',
+  `IsManual` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否手动维护（1=手动，0=自动同步）',
+  `LastUpdatedUserId` BIGINT NOT NULL DEFAULT 0 COMMENT '最后更新人用户ID',
+  `LastUpdatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最后更新时间',
+  `CreatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `UpdatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uq_modelkey` (`ModelKey`),
+  KEY `idx_manufacturer_model` (`Manufacturer`,`Model`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='车型主表';
+
+-- ----------------------------
+-- 1b. 调校表（每辆车可有多条调校记录）
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `VehicleTunes` (
+  `Id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `VehicleId` INT UNSIGNED NOT NULL COMMENT '关联车型ID',
+  `Class` VARCHAR(20) NOT NULL COMMENT '等级',
+  `MatchType` VARCHAR(20) NOT NULL COMMENT '比赛类型',
+  `Drivetrain` VARCHAR(20) NULL COMMENT '传动方式: 四驱, 后驱, 前驱',
+  `PerformancePreference` VARCHAR(20) NULL COMMENT '性能偏好: 均衡, 操控, 动力, 高速, 加速等',
+  `TireCompound` VARCHAR(50) NULL COMMENT '胎面: 半热熔, 全热熔, 拉力胎, 直线胎, 越野胎, 漂移胎等',
+  `SurfaceCondition` VARCHAR(20) NULL COMMENT '适用路面: 干, 湿地, 通用',
+  `Strength` VARCHAR(20) NULL COMMENT '强度评级',
+  `Tuner` VARCHAR(255) NULL COMMENT '调校师XboxID',
+  `TuneRaw` VARCHAR(255) NULL COMMENT '调校码/关键词',
+  `Remarks` VARCHAR(255) NULL COMMENT '备注：手感、特殊开法等',
+  `LapTime` VARCHAR(255) NULL COMMENT '圈速测试结果，如”白川54.5”',
+  `ExtData` TEXT NULL COMMENT '扩展字段，存储额外属性，如侧向G值、极速等',
+  `SourceFileId` VARCHAR(128) NOT NULL COMMENT '来源文件ID',
+  `SourceSheet` VARCHAR(128) NULL COMMENT '来源工作表名',
+  `SourceRow` INT NULL COMMENT '来源行号',
+  `SourceDisplayName` VARCHAR(255) NULL COMMENT '来源展示名（用于调试）',
+  `SourceIdentity` VARCHAR(512) NOT NULL COLLATE utf8mb4_bin COMMENT '来源唯一标识（区分大小写，用于幂等同步）',
+  `SourceIdentitySeq` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '同标识下的序号（处理同一行多条调校）',
+  `SourceFingerprint` CHAR(64) NULL COMMENT '行内容指纹（SHA-256），用于检测变更',
+  `IsManual` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否手动维护（1=手动，0=自动同步）',
+  `TuneStatus` VARCHAR(10) NOT NULL DEFAULT '正常' COMMENT '调校状态: 正常, 存疑, 弃用',
+  `LastUpdatedUserId` BIGINT NOT NULL DEFAULT 0 COMMENT '最后更新人用户ID',
+  `LastUpdatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最后更新时间',
+  `CreatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `UpdatedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`Id`),
+  KEY `idx_vehicle` (`VehicleId`),
+  KEY `idx_class_match` (`Class`,`MatchType`),
+  KEY `idx_source` (`SourceFileId`),
+  KEY `idx_status` (`TuneStatus`),
+  UNIQUE KEY `uq_source_identity` (`SourceFileId`,`SourceIdentity`,`SourceIdentitySeq`),
+  CONSTRAINT `fk_tune_vehicle` FOREIGN KEY (`VehicleId`) REFERENCES `Vehicles`(`Id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='调校表（每辆车可有多条）';
+
+-- ----------------------------
+-- 1c. 调校缓存表（展示用宽表，来自 Vehicles+VehicleTunes JOIN 展平）
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `VehicleTuneCache` (
+  `Id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `TuneId` INT UNSIGNED NOT NULL COMMENT '对应 VehicleTunes.Id',
+  `VehicleId` INT UNSIGNED NOT NULL COMMENT '对应 Vehicles.Id',
+  `Class` VARCHAR(20) NOT NULL COMMENT '等级',
+  `MatchType` VARCHAR(20) NOT NULL COMMENT '比赛类型',
+  `Drivetrain` VARCHAR(20) NULL COMMENT '传动方式',
+  `PerformancePreference` VARCHAR(20) NULL COMMENT '性能偏好',
+  `TireCompound` VARCHAR(50) NULL COMMENT '胎面',
+  `SurfaceCondition` VARCHAR(20) NULL COMMENT '适用路面',
+  `Strength` VARCHAR(20) NULL COMMENT '强度评级',
+  `Tuner` VARCHAR(255) NULL COMMENT '调校师XboxID',
+  `TuneRaw` VARCHAR(255) NULL COMMENT '调校码/关键词',
+  `Remarks` VARCHAR(255) NULL COMMENT '备注',
+  `LapTime` VARCHAR(255) NULL COMMENT '圈速',
+  `ExtData` TEXT NULL COMMENT '扩展字段',
+  `SourceFileId` VARCHAR(128) NOT NULL COMMENT '来源文件ID',
+  `SourceSheet` VARCHAR(128) NULL COMMENT '来源工作表名',
+  `SourceRow` INT NULL COMMENT '来源行号',
+  `SourceDisplayName` VARCHAR(255) NULL COMMENT '来源展示名',
+  `SourceIdentity` VARCHAR(512) NOT NULL COLLATE utf8mb4_bin COMMENT '来源唯一标识',
+  `SourceFingerprint` CHAR(64) NULL COMMENT '行内容指纹',
+  `CapturedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '缓存捕获时间',
+  PRIMARY KEY (`Id`),
+  UNIQUE KEY `uq_cache_tune` (`TuneId`),
+  KEY `idx_cache_source` (`SourceFileId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='调校缓存表（展示用宽表）';
 
 -- ----------------------------
 -- 2. 赛道表
